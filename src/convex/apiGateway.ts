@@ -28,6 +28,8 @@ function requestId(): string {
 
 /**
  * Optional passthrough to the real Flipkart mobile API (2.rome.api.flipkart.com).
+ * Every captured route below tries the live API first via `tryFlipkart` and
+ * falls back to the in-app mirror when no session creds are configured.
  * Returns a gateway Response when Flipkart creds are configured AND the
  * upstream answers; returns null so the caller falls back to the in-app mirror.
  * `forwardHeaders` lets the response carry Flipkart's own tracking headers.
@@ -50,9 +52,6 @@ async function tryFlipkart(
     return null;
   }
   const source = "flipkart-live";
-  if (ref.endpoint === "/api/4/page/fetch") {
-    return ok(ref, { proxy: true, flipkart: result.data }, { source, upstreamStatus: result.status });
-  }
   return ok(ref, { proxy: true, flipkart: result.data }, { source, upstreamStatus: result.status });
 }
 
@@ -172,6 +171,12 @@ export function registerApiRoutes(http: Router): void {
       if (!phoneStr && !emailStr.includes("@")) {
         return bad(ref, 400, "invalid_identifier", "Send { phone } or { email } in the request body.");
       }
+      // Live Flipkart first — read-only check that proxies cleanly.
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/6/user/signup/status", {
+        phone: phoneStr,
+        email: emailStr,
+      });
+      if (upstream) return upstream;
       const exists = phoneStr
         ? await ctx.runQuery(api.users.phoneExists, { phone: phoneStr })
         : await ctx.runQuery(api.users.emailExists, { email: emailStr });
@@ -201,14 +206,9 @@ export function registerApiRoutes(http: Router): void {
         );
       }
 
-      // Live Flipkart OTP — forwards to the real /api/7/user/otp/generate so
-      // Flipkart sends the actual SMS to the number. Falls back to our mirror.
-      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/7/user/otp/generate", {
-        phone: phoneDigits,
-        email: emailStr.includes("@") ? emailStr : undefined,
-      });
-      if (upstream) return upstream;
-
+      // OTP generation stays on our stack: a code Flipkart generates can't be
+      // verified against our session store, so delivery is real Twilio SMS
+      // when TWILIO keys are set, or an on-screen demo code otherwise.
       const result = await ctx.runAction(api.otp.sendOtp, {
         phone: phoneDigits || undefined,
         email: emailStr.includes("@") ? emailStr : undefined,
@@ -280,78 +280,130 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/user/session-identity",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/1/user/session-identity", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/1/user/session-identity", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/user/session-identity");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/4/user/state",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/4/user/state", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/4/user/state", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/4/user/state");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   // ============ Location ============
   addRoute(http, {
     path: "/api/1/location/serviceability",
     method: "POST",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/1/location/serviceability", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/1/location/serviceability", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/location/serviceability", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/4/location/update",
     method: "POST",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/4/location/update", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/4/location/update", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/4/location/update", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/1/contacts",
     method: "GET",
-    handler: async () => sessionScoped({ endpoint: "/api/1/contacts", method: "GET" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/1/contacts", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/contacts" + new URL(request.url).search);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/3/user/contact",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/3/user/contact", method: "GET" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/3/user/contact", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/3/user/contact" + new URL(request.url).search);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   // ============ Cart ============
   addRoute(http, {
     path: "/api/5/cart/browse",
     method: "GET",
-    handler: async () => sessionScoped({ endpoint: "/api/5/cart/browse", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/5/cart/browse", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/5/cart/browse");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/5/cart/add",
     method: "POST",
-    handler: async () => sessionScoped({ endpoint: "/api/5/cart/add", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/5/cart/add", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/5/cart/add", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/5/cart/remove",
     method: "DELETE",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/5/cart/remove", method: "DELETE" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/5/cart/remove", method: "DELETE" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "DELETE", "/api/5/cart/remove", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   // ============ Orders ============
   addRoute(http, {
     path: "/api/5/self-serve/orders",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/5/self-serve/orders", method: "GET" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/5/self-serve/orders", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/5/self-serve/orders" + new URL(request.url).search);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/1/orders/place",
     method: "POST",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/1/orders/place", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/1/orders/place", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/orders/place", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
@@ -362,6 +414,10 @@ export function registerApiRoutes(http: Router): void {
       const segs = pathSegments(request); // [api,1,orders,id,tail?]
       const orderId = segs[3];
       const tail = segs[4];
+      if (orderId && tail) {
+        const upstream = await tryFlipkart(ctx, ref, "GET", `/api/1/orders/${orderId}/${tail}`);
+        if (upstream) return upstream;
+      }
       if (tail !== "tracking") {
         return bad(ref, 404, "not_found", "Unknown orders sub-path.");
       }
@@ -396,6 +452,19 @@ export function registerApiRoutes(http: Router): void {
       const orderId = segs[3];
       const tail = segs[4];
 
+      // Live Flipkart first for cancel/return/other order actions.
+      if (orderId && tail) {
+        const body = await readJson(request);
+        const upstream = await tryFlipkart(
+          ctx,
+          { endpoint: `/api/1/orders/{id}/${tail}`, method: "POST" },
+          "POST",
+          `/api/1/orders/${orderId}/${tail}`,
+          body,
+        );
+        if (upstream) return upstream;
+      }
+
       if (tail === "cancel") {
         const ref = { endpoint: "/api/1/orders/{id}/cancel", method: "POST" };
         if (!orderId) return bad(ref, 400, "missing_id", "Order id is required.");
@@ -429,29 +498,45 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/2/wallet/balance",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/2/wallet/balance", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/2/wallet/balance", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/2/wallet/balance");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/2/wallet/egv/active",
     method: "GET",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/2/wallet/egv/active", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/2/wallet/egv/active", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/2/wallet/egv/active");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/2/payment/initiate",
     method: "POST",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/2/payment/initiate", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/2/payment/initiate", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/2/payment/initiate", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/1/affordability/bnpl/account",
     method: "POST",
-    handler: async () => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/affordability/bnpl/account", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/affordability/bnpl/account", body);
+      if (upstream) return upstream;
       return ok(
         ref,
         {
@@ -468,12 +553,14 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/coupon/validate",
     method: "POST",
-    handler: async (_ctx, request) => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/coupon/validate", method: "POST" };
       const { code } = await readJson(request);
       if (typeof code !== "string") {
         return bad(ref, 400, "invalid_body", "Send { code } in the request body.");
       }
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/coupon/validate", { code: code.trim() });
+      if (upstream) return upstream;
       const coupon = COUPONS[code.trim().toUpperCase()];
       if (!coupon) return ok(ref, { valid: false, code });
       return ok(ref, { valid: true, code: code.trim().toUpperCase(), ...coupon });
@@ -484,8 +571,10 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/egv/denominations",
     method: "GET",
-    handler: async () => {
+    handler: async (ctx) => {
       const ref = { endpoint: "/api/1/egv/denominations", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/egv/denominations");
+      if (upstream) return upstream;
       return ok(
         ref,
         EGV_DENOMINATIONS.map((denomination) => ({
@@ -500,8 +589,10 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/egv/locations",
     method: "GET",
-    handler: async () => {
+    handler: async (ctx) => {
       const ref = { endpoint: "/api/1/egv/locations", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/egv/locations");
+      if (upstream) return upstream;
       return ok(ref, EGV_LOCATIONS, { count: EGV_LOCATIONS.length });
     },
   });
@@ -553,9 +644,11 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/action/view",
     method: "GET",
-    handler: async (_ctx, request) => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/action/view", method: "GET" };
       const action = new URL(request.url).searchParams.get("action") ?? "view";
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/action/view" + new URL(request.url).search);
+      if (upstream) return upstream;
       return ok(ref, { action, tracked: true }, {
         note: "Demo — events are acknowledged, not persisted.",
       });
@@ -565,9 +658,11 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/connekt/push/callback",
     method: "POST",
-    handler: async (_ctx, request) => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/connekt/push/callback", method: "POST" };
       const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/connekt/push/callback", body);
+      if (upstream) return upstream;
       return ok(ref, { received: true, event: body.event ?? "unknown" });
     },
   });
@@ -576,14 +671,24 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/1/wishlist",
     method: "GET",
-    handler: async () => sessionScoped({ endpoint: "/api/1/wishlist", method: "GET" }),
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/1/wishlist", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/wishlist");
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   addRoute(http, {
     path: "/api/1/wishlist/add",
     method: "POST",
-    handler: async () =>
-      sessionScoped({ endpoint: "/api/1/wishlist/add", method: "POST" }),
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/1/wishlist/add", method: "POST" };
+      const body = await readJson(request);
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/1/wishlist/add", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
   });
 
   // ============ Browse & content catalog ============
@@ -629,6 +734,8 @@ export function registerApiRoutes(http: Router): void {
     method: "GET",
     handler: async (ctx) => {
       const ref = { endpoint: "/api/1/categories", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/categories");
+      if (upstream) return upstream;
       const categories = await ctx.runQuery(api.products.listCategories, {});
       return ok(ref, categories, { count: categories.length });
     },
@@ -639,6 +746,8 @@ export function registerApiRoutes(http: Router): void {
     method: "GET",
     handler: async (ctx) => {
       const ref = { endpoint: "/api/1/browse/departments", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/browse/departments");
+      if (upstream) return upstream;
       const categories = await ctx.runQuery(api.products.listCategories, {});
       return ok(ref, categories, {
         count: categories.length,
@@ -652,6 +761,8 @@ export function registerApiRoutes(http: Router): void {
     method: "GET",
     handler: async (ctx) => {
       const ref = { endpoint: "/api/1/deals", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/deals");
+      if (upstream) return upstream;
       const deals = await ctx.runQuery(api.products.dealProducts, { limit: 8 });
       return ok(ref, deals, { count: deals.length, label: "Today's best value" });
     },
@@ -662,6 +773,8 @@ export function registerApiRoutes(http: Router): void {
     method: "GET",
     handler: async (ctx) => {
       const ref = { endpoint: "/api/1/offers", method: "GET" };
+      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/1/offers");
+      if (upstream) return upstream;
       const products = await ctx.runQuery(api.products.listProducts, {
         sort: "featured",
       });
@@ -687,6 +800,15 @@ export function registerApiRoutes(http: Router): void {
       const segs = pathSegments(request); // [api,1,product,id,tail?]
       const productId = segs[3];
       const tail = segs[4];
+      if (productId) {
+        const upstream = await tryFlipkart(
+          ctx,
+          { endpoint: `/api/1/product/{id}${tail ? `/${tail}` : ""}`, method: "GET" },
+          "GET",
+          `/api/1/product/${productId}${tail ? `/${tail}` : ""}`,
+        );
+        if (upstream) return upstream;
+      }
       if (!productId) {
         return bad(
           { endpoint: "/api/1/product/{id}", method: "GET" },
@@ -736,6 +858,17 @@ export function registerApiRoutes(http: Router): void {
       const segs = pathSegments(request); // [api,1,product,id,tail?]
       const productId = segs[3];
       const tail = segs[4];
+      if (productId && tail) {
+        const body = await readJson(request);
+        const upstream = await tryFlipkart(
+          ctx,
+          { endpoint: `/api/1/product/{id}/${tail}`, method: "POST" },
+          "POST",
+          `/api/1/product/${productId}/${tail}`,
+          body,
+        );
+        if (upstream) return upstream;
+      }
       if (tail !== "notify-me") {
         return bad(
           { endpoint: "/api/1/product/{id}/notify-me", method: "POST" },
