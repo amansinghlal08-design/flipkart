@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router";
 import { SearchX, SlidersHorizontal } from "lucide-react";
 import { api } from "@/convex/_generated/api";
@@ -11,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ProductCard } from "@/components/store/ProductCard";
+import { api as apiClient, useApiResource } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 
 const SORTS = [
@@ -27,8 +29,8 @@ export default function Shop() {
   const category = searchParams.get("category") ?? "";
   const sort = searchParams.get("sort") ?? "featured";
 
-  const categories = useQuery(api.products.listCategories);
-  const products = useQuery(api.products.listProducts, {
+  const categoriesQuery = useQuery(api.products.listCategories);
+  const productsQuery = useQuery(api.products.listProducts, {
     q: q || undefined,
     category: category || undefined,
     sort: (SORTS.some((s) => s.value === sort) ? sort : "featured") as
@@ -39,7 +41,22 @@ export default function Shop() {
       | "newest",
   });
 
-  const categoryName = categories?.find((c) => c.slug === category)?.name;
+  const categories = useApiResource(
+    useCallback(() => apiClient.categories(), []),
+    categoriesQuery,
+  );
+  const products = useApiResource(
+    useCallback(
+      () => apiClient.search({ q: q || undefined, category: category || undefined, sort }),
+      [q, category, sort],
+    ),
+    productsQuery,
+  );
+
+  const list = categories.data ?? [];
+  const productList = products.data;
+
+  const categoryName = list.find((c) => c.slug === category)?.name;
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -63,16 +80,20 @@ export default function Shop() {
             {title}
           </h1>
           <p className="mt-2 text-sm text-neutral-500">
-            {products ? `${products.length} product${products.length === 1 ? "" : "s"}` : "Loading…"}
+            {productList
+              ? `${productList.length} product${productList.length === 1 ? "" : "s"}`
+              : "Loading…"}
+            {products.source === "api" && (
+              <span className="ml-2 font-mono text-[11px] text-neutral-400">
+                GET /api/v2/search · {products.latencyMs}ms
+              </span>
+            )}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="h-4 w-4 text-neutral-400" />
-          <Select
-            value={sort}
-            onValueChange={(value) => update({ sort: value })}
-          >
+          <Select value={sort} onValueChange={(value) => update({ sort: value })}>
             <SelectTrigger className="w-44 rounded-full border-neutral-200 bg-white text-[13px]">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
@@ -101,7 +122,7 @@ export default function Shop() {
         >
           All
         </button>
-        {(categories ?? []).map((c) => (
+        {list.map((c) => (
           <button
             key={c.slug}
             type="button"
@@ -118,7 +139,7 @@ export default function Shop() {
         ))}
       </div>
 
-      {products === undefined ? (
+      {productList === undefined ? (
         <div className="mt-10 grid grid-cols-2 gap-x-5 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="space-y-3">
@@ -128,7 +149,7 @@ export default function Shop() {
             </div>
           ))}
         </div>
-      ) : products.length === 0 ? (
+      ) : productList.length === 0 ? (
         <div className="flex flex-col items-center py-24 text-center">
           <span className="grid h-14 w-14 place-items-center rounded-full bg-neutral-100">
             <SearchX className="h-6 w-6 text-neutral-400" />
@@ -150,7 +171,7 @@ export default function Shop() {
         </div>
       ) : (
         <div className="mt-10 grid grid-cols-2 gap-x-5 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
-          {products.map((product) => (
+          {productList.map((product) => (
             <ProductCard key={product._id} product={product} />
           ))}
         </div>

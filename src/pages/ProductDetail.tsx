@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ProductVisual } from "@/components/store/ProductVisual";
+import { api as apiClient, useApiResource } from "@/lib/apiClient";
 import { deliveryEta, discountPct, inr, pincodeEta } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -27,13 +28,25 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
-  const product = useQuery(api.products.getProduct, {
+  const productQuery = useQuery(api.products.getProduct, {
     productId: id as never,
   });
-  const reviews = useQuery(api.products.listReviews, {
+  const reviewsQuery = useQuery(api.products.listReviews, {
     productId: id as never,
   });
   const wishlist = useQuery(api.wishlist.getWishlist);
+
+  const productResource = useApiResource(
+    useCallback(() => apiClient.product(id as string), [id]),
+    productQuery,
+  );
+  const reviewsResource = useApiResource(
+    useCallback(() => apiClient.productReviews(id as string), [id]),
+    reviewsQuery,
+  );
+
+  const productData = productResource.data;
+  const reviewList = reviewsResource.data;
 
   const addToCart = useMutation(api.cart.addToCart);
   const toggleWishlist = useMutation(api.wishlist.toggleWishlist);
@@ -45,11 +58,11 @@ export default function ProductDetail() {
   const [busy, setBusy] = useState(false);
 
   const saved = useMemo(() => {
-    if (!wishlist || !product) return false;
-    return wishlist.some((entry) => entry.product._id === product._id);
-  }, [wishlist, product]);
+    if (!wishlist || !productData) return false;
+    return wishlist.some((entry) => entry.product._id === productData._id);
+  }, [wishlist, productData]);
 
-  if (product === undefined) {
+  if (productData === undefined) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="grid gap-10 lg:grid-cols-2">
@@ -65,7 +78,7 @@ export default function ProductDetail() {
     );
   }
 
-  if (product === null) {
+  if (productData === null) {
     return (
       <div className="flex flex-col items-center py-28 text-center">
         <h1 className="text-xl font-semibold text-neutral-900">
@@ -80,6 +93,8 @@ export default function ProductDetail() {
       </div>
     );
   }
+
+  const product = productData;
 
   const off = discountPct(product.price, product.mrp);
   const out = product.stock <= 0;
@@ -193,6 +208,11 @@ export default function ProductDetail() {
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
             {product.name}
           </h1>
+          {productResource.source === "api" && (
+            <p className="mt-1 font-mono text-[11px] text-neutral-400">
+              GET /api/v2/product/{product._id} · {productResource.latencyMs}ms
+            </p>
+          )}
 
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
             <span className="flex items-center gap-1.5">
@@ -389,6 +409,11 @@ export default function ProductDetail() {
               {product.rating} average from {product.ratingCount.toLocaleString("en-IN")}{" "}
               ratings
             </p>
+            {reviewsResource.source === "api" && (
+              <p className="mt-0.5 font-mono text-[11px] text-neutral-400">
+                GET /api/v2/product/{product._id}/reviews · {reviewsResource.latencyMs}ms
+              </p>
+            )}
           </div>
           {isAuthenticated ? (
             <ReviewForm productId={product._id} />
@@ -402,7 +427,7 @@ export default function ProductDetail() {
         </div>
 
         <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {(reviews ?? []).map((review) => (
+          {(reviewList ?? []).map((review) => (
             <article
               key={review._id}
               className="rounded-xl border border-neutral-200 p-5"
@@ -426,7 +451,7 @@ export default function ProductDetail() {
               </p>
             </article>
           ))}
-          {reviews !== undefined && reviews.length === 0 && (
+          {reviewList !== undefined && reviewList.length === 0 && (
             <p className="text-sm text-neutral-500">
               No reviews yet — be the first.
             </p>

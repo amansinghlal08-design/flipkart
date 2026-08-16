@@ -14,6 +14,7 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Shop = lazy(() => import("./pages/Shop.tsx"));
+const Minutes = lazy(() => import("./pages/Minutes.tsx"));
 const ApiExplorer = lazy(() => import("./pages/ApiExplorer.tsx"));
 const ProductDetail = lazy(() => import("./pages/ProductDetail.tsx"));
 const Cart = lazy(() => import("./pages/Cart.tsx"));
@@ -132,6 +133,7 @@ createRoot(document.getElementById("root")!).render(
               <Route element={<StoreLayout />}>
                 <Route path="/" element={<Landing />} />
                 <Route path="/shop" element={<Shop />} />
+                <Route path="/minutes" element={<Minutes />} />
                 <Route path="/api" element={<ApiExplorer />} />
                 <Route path="/product/:id" element={<ProductDetail />} />
                 <Route
@@ -193,7 +195,7 @@ createRoot(document.getElementById("root")!).render(
               </Route>
               <Route
                 path="/auth"
-                element={<AuthPage redirectAfterAuth="/" />}
+                element={<AuthPage redirectAfterAuth="/account" />}
               />
               <Route path="*" element={<NotFound />} />
             </Routes>

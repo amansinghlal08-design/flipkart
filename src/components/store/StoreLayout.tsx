@@ -1,11 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
-import { Search, ShoppingBag, User, Wallet, Heart, Package } from "lucide-react";
+import {
+  Grid2x2,
+  Loader2,
+  Package,
+  Search,
+  ShoppingBag,
+  Tag,
+  User,
+  Wallet,
+  Heart,
+  Package as PackageIcon,
+  Zap,
+} from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { api as apiClient, type Suggestion } from "@/lib/apiClient";
 
 let seedRequested = false;
 
@@ -35,12 +48,115 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
+function SearchBox({ className }: { className?: string }) {
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setSuggestions([]);
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
+    const timer = setTimeout(() => {
+      apiClient
+        .suggestions(term)
+        .then((result) => {
+          if (result.envelope.ok) setSuggestions(result.envelope.data);
+          setBusy(false);
+        })
+        .catch(() => setBusy(false));
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const term = query.trim();
+    setOpen(false);
+    navigate(term ? `/shop?q=${encodeURIComponent(term)}` : "/shop");
+  };
+
+  const pick = (suggestion: Suggestion) => {
+    setOpen(false);
+    if (suggestion.target) navigate(suggestion.target);
+    else navigate(`/shop?q=${encodeURIComponent(query.trim() || suggestion.label)}`);
+  };
+
+  const SuggestionIcon =
+    suggestions.length > 0
+      ? { product: Package, brand: Tag, category: Grid2x2 }
+      : null;
+
+  return (
+    <div ref={boxRef} className={cn("relative w-full", className)}>
+      <form onSubmit={submit} role="search">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+          <Input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder="Search products, brands…"
+            className="h-9 rounded-full border-neutral-200 bg-neutral-50 pl-9 pr-4 text-sm focus-visible:bg-white"
+            aria-label="Search products"
+            autoComplete="off"
+          />
+          {busy && (
+            <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-neutral-400" />
+          )}
+        </div>
+      </form>
+      {open && suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 z-50 mt-2 max-h-80 overflow-auto rounded-xl border border-neutral-200 bg-white">
+          {suggestions.map((suggestion, index) => {
+            const Icon = SuggestionIcon?.[suggestion.type] ?? Search;
+            return (
+              <button
+                key={`${suggestion.type}-${suggestion.label}-${index}`}
+                type="button"
+                onClick={() => pick(suggestion)}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-neutral-50"
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                <span className="truncate text-[13px] text-neutral-800">
+                  {suggestion.label}
+                </span>
+                <span className="ml-auto shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-400">
+                  {suggestion.type}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Header() {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [query, setQuery] = useState("");
-  const [queryMobile, setQueryMobile] = useState("");
   const cart = useQuery(api.cart.getCart);
   const wishlist = useQuery(api.wishlist.getWishlist);
   const categories = useQuery(api.products.listCategories);
@@ -48,20 +164,12 @@ function Header() {
   const cartCount = (cart ?? []).reduce((sum, entry) => sum + entry.item.quantity, 0);
   const wishlistCount = wishlist?.length ?? 0;
 
-  const submit = (e: React.FormEvent<HTMLFormElement>, value: string) => {
-    e.preventDefault();
-    const q = value.trim();
-    navigate(q ? `/shop?q=${encodeURIComponent(q)}` : "/shop");
-  };
-
   const currentCategory = new URLSearchParams(location.search).get("category");
 
   const navLink = (to: string, active: boolean) =>
     cn(
       "whitespace-nowrap text-[13px] transition-colors",
-      active
-        ? "font-medium text-neutral-900"
-        : "text-neutral-500 hover:text-neutral-900",
+      active ? "font-medium text-neutral-900" : "text-neutral-500 hover:text-neutral-900",
     );
 
   return (
@@ -69,23 +177,10 @@ function Header() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center gap-4">
           <Brand />
-          <form
-            onSubmit={(e) => submit(e, query)}
-            className="hidden flex-1 justify-center md:flex"
-            role="search"
-          >
-            <div className="relative w-full max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search products, brands…"
-                className="h-9 rounded-full border-neutral-200 bg-neutral-50 pl-9 pr-4 text-sm focus-visible:bg-white"
-                aria-label="Search products"
-              />
-            </div>
-          </form>
-          <nav className="ml-auto flex items-center gap-1 sm:gap-2">
+          <div className="hidden flex-1 justify-center md:flex">
+            <SearchBox className="max-w-md" />
+          </div>
+          <nav className="ml-auto flex items-center gap-0.5 sm:gap-1.5">
             <Link
               to="/wishlist"
               className="relative rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
@@ -99,7 +194,7 @@ function Header() {
               className="hidden rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 sm:block"
               aria-label="Orders"
             >
-              <Package className="h-5 w-5" />
+              <PackageIcon className="h-5 w-5" />
             </Link>
             <Link
               to="/wallet"
@@ -110,10 +205,7 @@ function Header() {
             </Link>
             <Link
               to="/account"
-              className={cn(
-                "flex items-center gap-2 rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900",
-                !isAuthenticated && "hidden sm:flex",
-              )}
+              className="flex items-center gap-2 rounded-full p-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
               aria-label="Account"
             >
               {isAuthenticated && user?.name ? (
@@ -127,7 +219,7 @@ function Header() {
             {!isAuthenticated && (
               <Link
                 to="/auth"
-                className="ml-1 hidden rounded-full border border-neutral-300 px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:bg-neutral-100 sm:block"
+                className="ml-0.5 shrink-0 rounded-full border border-neutral-900 px-3 py-1.5 text-[13px] font-medium text-neutral-900 transition-colors hover:bg-neutral-900 hover:text-white"
               >
                 Sign in
               </Link>
@@ -143,29 +235,32 @@ function Header() {
           </nav>
         </div>
 
-        <form
-          onSubmit={(e) => submit(e, queryMobile)}
-          className="pb-3 md:hidden"
-          role="search"
-        >
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-            <Input
-              value={queryMobile}
-              onChange={(e) => setQueryMobile(e.target.value)}
-              placeholder="Search products, brands…"
-              className="h-9 rounded-full border-neutral-200 bg-neutral-50 pl-9 pr-4 text-sm focus-visible:bg-white"
-              aria-label="Search products"
-            />
-          </div>
-        </form>
+        <div className="pb-3 md:hidden">
+          <SearchBox />
+        </div>
       </div>
 
       <nav className="border-t border-neutral-100">
         <div className="mx-auto flex max-w-7xl items-center gap-6 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] sm:px-6 lg:px-8 [&::-webkit-scrollbar]:hidden">
           <Link
+            to="/minutes"
+            className={cn(
+              "flex shrink-0 items-center gap-1 whitespace-nowrap text-[13px] font-semibold uppercase tracking-[0.08em] transition-colors",
+              location.pathname === "/minutes"
+                ? "text-neutral-900"
+                : "text-neutral-700 hover:text-neutral-900",
+            )}
+          >
+            <Zap className="h-3.5 w-3.5" />
+            Minutes
+          </Link>
+          <span className="h-4 w-px shrink-0 bg-neutral-200" />
+          <Link
             to="/shop"
-            className={navLink("/shop", !currentCategory && location.pathname === "/shop")}
+            className={navLink(
+              "/shop",
+              !currentCategory && location.pathname === "/shop",
+            )}
           >
             All products
           </Link>
@@ -189,7 +284,7 @@ function Header() {
 
 function Footer() {
   const categories = useQuery(api.products.listCategories);
-  const shopLinks = (categories ?? []).slice(0, 5);
+  const shopLinks = (categories ?? []).slice(0, 4);
 
   const linkClass =
     "text-[13px] text-neutral-500 transition-colors hover:text-neutral-900";
@@ -210,6 +305,11 @@ function Footer() {
               Shop
             </h4>
             <ul className="mt-4 space-y-2.5">
+              <li>
+                <Link to="/minutes" className={linkClass}>
+                  Minutes — fast delivery
+                </Link>
+              </li>
               <li>
                 <Link to="/shop" className={linkClass}>
                   All products

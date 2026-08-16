@@ -73,7 +73,7 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
 function addRoute(
   http: Router,
   spec: {
-    method: "GET" | "POST" | "DELETE";
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     path?: string;
     pathPrefix?: string;
     handler: Handler;
@@ -608,3 +608,449 @@ export function registerApiRoutes(http: Router): void {
     },
   });
 }
+
+// ====================================================================
+// v2 surface — the "missing" APIs required for a complete e-commerce flow
+// ====================================================================
+
+export function registerV2ApiRoutes(http: Router): void {
+  // ---------- Search & discovery ----------
+  addRoute(http, {
+    path: "/api/v2/search/suggestions",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/search/suggestions", method: "GET" };
+      const q = (new URL(request.url).searchParams.get("q") ?? "").trim().toLowerCase();
+      if (!q) return ok(ref, [], { count: 0 });
+      const products = await ctx.runQuery(api.products.listProducts, {});
+      const suggestions: { type: string; label: string; target?: string }[] = [];
+      for (const p of products) {
+        if (suggestions.length >= 7) break;
+        if (p.name.toLowerCase().includes(q)) {
+          suggestions.push({ type: "product", label: p.name, target: `/product/${p._id}` });
+        } else if (p.brand.toLowerCase().includes(q)) {
+          suggestions.push({ type: "brand", label: p.brand });
+        } else if (p.category.toLowerCase().includes(q)) {
+          suggestions.push({ type: "category", label: p.category, target: `/shop?category=${p.category}` });
+        } else if (p.tags.some((tag) => tag.toLowerCase().includes(q))) {
+          suggestions.push({ type: "product", label: p.name, target: `/product/${p._id}` });
+        }
+      }
+      return ok(ref, suggestions, { count: suggestions.length, query: q });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/categories",
+    method: "GET",
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/v2/categories", method: "GET" };
+      const categories = await ctx.runQuery(api.products.listCategories, {});
+      return ok(ref, categories, { count: categories.length });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/deals",
+    method: "GET",
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/v2/deals", method: "GET" };
+      const deals = await ctx.runQuery(api.products.dealProducts, { limit: 8 });
+      return ok(ref, deals, { count: deals.length, label: "Today's best value" });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/flash-sales",
+    method: "GET",
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/v2/flash-sales", method: "GET" };
+      const deals = await ctx.runQuery(api.products.dealProducts, { limit: 6 });
+      const endsAt = Date.now() + 3 * 3600 * 1000;
+      return ok(
+        ref,
+        deals.map((p, index) => ({
+          productId: p._id,
+          name: p.name,
+          brand: p.brand,
+          category: p.category,
+          price: p.price,
+          mrp: p.mrp,
+          discountPct: Math.round(((p.mrp - p.price) / p.mrp) * 100),
+          endsAt: endsAt - index * 60000,
+          badge: p.badges[0] ?? "Flash",
+        })),
+        { count: deals.length, windowHours: 3 },
+      );
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/recommendations",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/recommendations", method: "GET" };
+      const productId = new URL(request.url).searchParams.get("productId");
+      const products = await ctx.runQuery(api.products.listProducts, {});
+      if (!productId) {
+        return ok(
+          ref,
+          products.sort((a, b) => b.rating - a.rating).slice(0, 8),
+          { count: 8, basis: "top rated" },
+        );
+      }
+      const current = await ctx.runQuery(api.products.getProduct, {
+        productId: productId as never,
+      });
+      const pool = products.filter((p) => p._id !== productId);
+      const sameCategory = current
+        ? pool.filter((p) => p.category === current.category)
+        : [];
+      const picks = [...sameCategory, ...pool.filter((p) => !sameCategory.includes(p))]
+        .sort((a, b) => b.rating - a.rating)
+        .slice(0, 8);
+      return ok(ref, picks, { count: picks.length, basis: "same category" });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/user/recently-viewed",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/user/recently-viewed", method: "GET" };
+      return ok(ref, [], {
+        note: "Browsing history is stored on-device (localStorage) in this build — the web app reads it directly.",
+      });
+    },
+  });
+
+  // ---------- Product surface ----------
+  addRoute(http, {
+    pathPrefix: "/api/v2/product/",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const segs = pathSegments(request); // [api,v2,product,id,tail?]
+      const productId = segs[3];
+      const tail = segs[4];
+      if (!productId) {
+        return bad({ endpoint: "/api/v2/product/{productId}", method: "GET" }, 400, "missing_id", "Product id is required.");
+      }
+      if (tail === "reviews") {
+        const ref = { endpoint: "/api/v2/product/{productId}/reviews", method: "GET" };
+        const reviews = await ctx.runQuery(api.products.listReviews, { productId: productId as never });
+        return ok(ref, reviews, { count: reviews.length });
+      }
+      if (tail === "availability") {
+        const ref = { endpoint: "/api/v2/product/{productId}/availability", method: "GET" };
+        const product = await ctx.runQuery(api.products.getProduct, { productId: productId as never });
+        if (!product) return bad(ref, 404, "product_not_found", "No product with that id.");
+        return ok(ref, {
+          productId,
+          inStock: product.stock > 0,
+          stock: product.stock,
+          lowStock: product.stock > 0 && product.stock <= 5,
+        });
+      }
+      const ref = { endpoint: "/api/v2/product/{productId}", method: "GET" };
+      const product = await ctx.runQuery(api.products.getProduct, { productId: productId as never });
+      if (!product) return bad(ref, 404, "product_not_found", "No product with that id.");
+      return ok(ref, product, { seller: "Staple Direct", delivery: { freeOver: 499, fee: 49 } });
+    },
+  });
+
+  addRoute(http, {
+    pathPrefix: "/api/v2/product/",
+    method: "POST",
+    handler: async () =>
+      sessionScoped({
+        endpoint: "/api/v2/product/{productId}/reviews",
+        method: "POST",
+      }),
+  });
+
+  addRoute(http, {
+    path: "/api/v2/compare",
+    method: "POST",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/compare", method: "POST" };
+      const { ids } = await readJson(request);
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return bad(ref, 400, "invalid_body", "Send { ids: string[] } in the request body.");
+      }
+      const products = await Promise.all(
+        ids.slice(0, 4).map((id) => ctx.runQuery(api.products.getProduct, { productId: id as never })),
+      );
+      const found = products.filter((p) => p !== null);
+      return ok(ref, found, { count: found.length });
+    },
+  });
+
+  addRoute(http, {
+    pathPrefix: "/api/v2/sellers/",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/sellers/{sellerId}", method: "GET" };
+      return ok(ref, {
+        id: "staple-direct",
+        name: "Staple Direct",
+        rating: 4.8,
+        ratingCount: 48210,
+        yearsActive: 6,
+        returnPolicy: "7-day no-questions returns",
+        fulfilment: "Ships from Staple warehouses in 24–48 h",
+      });
+    },
+  });
+
+  // ---------- Cart ----------
+  addRoute(http, {
+    path: "/api/v2/cart/add",
+    method: "POST",
+    handler: async () => sessionScoped({ endpoint: "/api/v2/cart/add", method: "POST" }),
+  });
+  addRoute(http, {
+    pathPrefix: "/api/v2/cart/items/",
+    method: "PUT",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/cart/items/{cartItemId}", method: "PUT" }),
+  });
+  addRoute(http, {
+    pathPrefix: "/api/v2/cart/items/",
+    method: "DELETE",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/cart/items/{cartItemId}", method: "DELETE" }),
+  });
+  addRoute(http, {
+    path: "/api/v2/cart/clear",
+    method: "DELETE",
+    handler: async () => sessionScoped({ endpoint: "/api/v2/cart/clear", method: "DELETE" }),
+  });
+
+  // ---------- Orders ----------
+  addRoute(http, {
+    path: "/api/v2/orders/create",
+    method: "POST",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/orders/create", method: "POST" }),
+  });
+
+  addRoute(http, {
+    pathPrefix: "/api/v2/orders/",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const segs = pathSegments(request); // [api,v2,orders,id,tail?]
+      const orderId = segs[3];
+      const tail = segs[4];
+      if (!orderId) return bad({ endpoint: "/api/v2/orders/{orderId}", method: "GET" }, 400, "missing_id", "Order id is required.");
+      const order = await ctx.runQuery(api.orders.getOrder, { orderId: orderId as never });
+      if (!order) {
+        return bad({ endpoint: "/api/v2/orders/{orderId}", method: "GET" }, 404, "order_not_found", "Requires a signed-in session and a valid order id.");
+      }
+      if (tail === "tracking") {
+        return ok(
+          { endpoint: "/api/v2/orders/{orderId}/tracking", method: "GET" },
+          {
+            orderNo: order.orderNo,
+            status: order.status,
+            timeline: order.timeline,
+            deliveryBy: order.deliveryBy,
+            items: order.items.map((item) => ({ name: item.name, quantity: item.quantity })),
+          },
+        );
+      }
+      return ok(
+        { endpoint: "/api/v2/orders/{orderId}", method: "GET" },
+        { orderNo: order.orderNo, status: order.status, items: order.items, totals: { itemTotal: order.itemTotal, discount: order.discount, deliveryFee: order.deliveryFee, grandTotal: order.grandTotal }, paymentMethod: order.paymentMethod, address: order.address },
+      );
+    },
+  });
+
+  addRoute(http, {
+    pathPrefix: "/api/v2/orders/",
+    method: "POST",
+    handler: async (ctx, request) => {
+      const segs = pathSegments(request); // [api,v2,orders,id,tail]
+      const orderId = segs[3];
+      const tail = segs[4];
+      if (tail === "cancel") {
+        const ref = { endpoint: "/api/v2/orders/{orderId}/cancel", method: "POST" };
+        if (!orderId) return bad(ref, 400, "missing_id", "Order id is required.");
+        try {
+          await ctx.runMutation(api.orders.cancelOrder, { orderId: orderId as never });
+          return ok(ref, { cancelled: true });
+        } catch (error) {
+          return bad(ref, 400, "cancel_failed", error instanceof Error ? error.message : "Could not cancel order.");
+        }
+      }
+      return sessionScoped({
+        endpoint: `/api/v2/orders/{orderId}/${tail === "return" ? "return" : "exchange"}`,
+        method: "POST",
+      });
+    },
+  });
+
+  addRoute(http, {
+    pathPrefix: "/api/v2/returns/",
+    method: "GET",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/returns/{returnId}", method: "GET" }),
+  });
+
+  // ---------- Payments ----------
+  addRoute(http, {
+    path: "/api/v2/payment/initiate",
+    method: "POST",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/payment/initiate", method: "POST" }),
+  });
+
+  addRoute(http, {
+    path: "/api/v2/payment/verify",
+    method: "POST",
+    handler: async (_ctx, request) => {
+      const ref = { endpoint: "/api/v2/payment/verify", method: "POST" };
+      const body = await readJson(request);
+      return ok(ref, { verified: true, paymentId: body.paymentId ?? "demo_pay_123" }, {
+        note: "Demo — checkout settles wallet/COD/card payments itself.",
+      });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/payment/methods",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/payment/methods", method: "GET" };
+      return ok(ref, [
+        { id: "wallet", label: "Staple wallet", detail: "Instant from your wallet balance", enabled: true },
+        { id: "cod", label: "Cash on delivery", detail: "Pay when your order arrives", enabled: true },
+        { id: "card", label: "Credit / debit card", detail: "Demo checkout — no real charge", enabled: true },
+        { id: "upi", label: "UPI", detail: "Demo — not enabled at checkout", enabled: false },
+      ]);
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/payment-methods",
+    method: "GET",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/payment-methods", method: "GET" }),
+  });
+
+  addRoute(http, {
+    path: "/api/v2/gift-cards",
+    method: "GET",
+    handler: async () => sessionScoped({ endpoint: "/api/v2/gift-cards", method: "GET" }),
+  });
+
+  // ---------- Discounts ----------
+  addRoute(http, {
+    path: "/api/v2/coupon/validate",
+    method: "POST",
+    handler: async (_ctx, request) => {
+      const ref = { endpoint: "/api/v2/coupon/validate", method: "POST" };
+      const { code } = await readJson(request);
+      if (typeof code !== "string") {
+        return bad(ref, 400, "invalid_body", "Send { code } in the request body.");
+      }
+      const coupon = COUPONS[code.trim().toUpperCase()];
+      if (!coupon) return ok(ref, { valid: false, code });
+      return ok(ref, { valid: true, code: code.trim().toUpperCase(), ...coupon });
+    },
+  });
+
+  // ---------- Wishlist ----------
+  addRoute(http, {
+    path: "/api/v2/wishlist",
+    method: "GET",
+    handler: async () => sessionScoped({ endpoint: "/api/v2/wishlist", method: "GET" }),
+  });
+  addRoute(http, {
+    path: "/api/v2/wishlist/add",
+    method: "POST",
+    handler: async () => sessionScoped({ endpoint: "/api/v2/wishlist/add", method: "POST" }),
+  });
+  addRoute(http, {
+    pathPrefix: "/api/v2/wishlist/items/",
+    method: "DELETE",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/wishlist/items/{wishlistItemId}", method: "DELETE" }),
+  });
+  addRoute(http, {
+    pathPrefix: "/api/v2/wishlist/items/",
+    method: "POST",
+    handler: async () =>
+      sessionScoped({
+        endpoint: "/api/v2/wishlist/items/{wishlistItemId}/move-to-cart",
+        method: "POST",
+      }),
+  });
+
+  // ---------- Notifications ----------
+  const NOTIFICATIONS = [
+    { id: "n1", type: "order", title: "Order confirmed", message: "Your order FB… is confirmed and being packed.", time: Date.now() - 3600e3, read: false },
+    { id: "n2", type: "wallet", title: "Wallet credited", message: "₹2,000 welcome credit is ready to use.", time: Date.now() - 7200e3, read: false },
+    { id: "n3", type: "promo", title: "Flash sale live", message: "Up to 50% off essentials — ends in 3 hours.", time: Date.now() - 86400e3, read: true },
+  ];
+  addRoute(http, {
+    path: "/api/v2/notifications",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/notifications", method: "GET" };
+      return ok(ref, NOTIFICATIONS, { count: NOTIFICATIONS.length, unread: NOTIFICATIONS.filter((n) => !n.read).length });
+    },
+  });
+  addRoute(http, {
+    pathPrefix: "/api/v2/notifications/",
+    method: "PATCH",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/notifications/{notificationId}/read", method: "PATCH" };
+      return ok(ref, { markedRead: true }, { note: "Demo — acknowledged, not persisted." });
+    },
+  });
+
+  // ---------- Support & misc ----------
+  addRoute(http, {
+    path: "/api/v2/support/chat",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/support/chat", method: "GET" };
+      return ok(ref, { available: true, hours: "9am–9pm IST", channel: "demo" }, {
+        note: "Demo envelope — a live chat UI is out of scope.",
+      });
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/subscriptions",
+    method: "POST",
+    handler: async () =>
+      sessionScoped({ endpoint: "/api/v2/subscriptions", method: "POST" }),
+  });
+
+  // ---------- Addresses & pickup points ----------
+  for (const method of ["GET", "POST", "PUT", "DELETE"] as const) {
+    addRoute(http, {
+      path: "/api/v2/addresses",
+      method,
+      handler: async () => sessionScoped({ endpoint: "/api/v2/addresses", method }),
+    });
+  }
+
+  addRoute(http, {
+    path: "/api/v2/locations/pickup-points",
+    method: "GET",
+    handler: async () => {
+      const ref = { endpoint: "/api/v2/locations/pickup-points", method: "GET" };
+      const points = [
+        { id: "pp-1", name: "Staple Minutes — MG Road", city: "Bengaluru", distanceKm: 1.2, etaMinutes: 10, open: true },
+        { id: "pp-2", name: "Staple Minutes — Indiranagar", city: "Bengaluru", distanceKm: 2.4, etaMinutes: 14, open: true },
+        { id: "pp-3", name: "Staple Kiosk — Connaught Place", city: "New Delhi", distanceKm: 0.8, etaMinutes: 9, open: true },
+        { id: "pp-4", name: "Staple Minutes — Linking Road", city: "Mumbai", distanceKm: 1.9, etaMinutes: 12, open: true },
+        { id: "pp-5", name: "Staple Kiosk — Anna Nagar", city: "Chennai", distanceKm: 1.1, etaMinutes: 10, open: false },
+      ];
+      return ok(ref, points, { count: points.length });
+    },
+  });
+}
+
