@@ -1234,9 +1234,37 @@ export function registerV2ApiRoutes(http: Router): void {
       return ok(ref, {
         source: flipkart.configured ? "flipkart-live" : "mirror",
         flipkartConfigured: flipkart.configured,
+        sessionPhone: flipkart.sessionPhone,
+        accessTokenExpiresAt: flipkart.accessTokenExpiresAt,
+        accessTokenExpired: flipkart.accessTokenExpired,
         channels: flipkart.channels,
         upstream: "https://2.rome.api.flipkart.com",
       });
+    },
+  });
+
+  // ---------- Real-session import (paste a captured cookie export) ----------
+  addRoute(http, {
+    path: "/api/v2/session/import",
+    method: "POST",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/session/import", method: "POST" };
+      const body = await readJson(request);
+      const cookies = typeof body.cookies === "string" ? body.cookies.trim() : "";
+      const phone = typeof body.phone === "string" ? body.phone : undefined;
+      if (!cookies) {
+        return bad(
+          ref,
+          400,
+          "missing_cookies",
+          "Send { cookies } — paste the captured T / SN / at / rt block from your device.",
+        );
+      }
+      const result = await ctx.runAction(api.flipkartProxy.importFlipkartSession, {
+        cookies,
+        ...(phone ? { phone } : {}),
+      });
+      return ok(ref, result, { source: "session-import" });
     },
   });
 

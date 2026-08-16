@@ -2269,6 +2269,34 @@
                 <i class="fas fa-sign-out-alt"></i>
                 <span>Logout</span>
             </button>
+
+            <!-- Connect real Flipkart session (paste a captured cookie export) -->
+            <div style="margin-top: 20px; background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <i class="fas fa-bolt" style="color: #2874f0;"></i>
+                    <h4 style="margin: 0; font-size: 15px;">Flipkart Live Session</h4>
+                </div>
+                <p style="margin: 6px 0 10px; font-size: 12.5px; color: #666; line-height: 1.5;">
+                    Paste the <b>T / SN / at / rt</b> cookie block captured from your logged-in
+                    Flipkart device to pull <b>real</b> products, cart, orders, wallet and addresses
+                    from 2.rome.api.flipkart.com — no demo data.
+                </p>
+                <div id="fkImportStatus" style="font-size: 12.5px; margin-bottom: 10px; padding: 8px 10px; border-radius: 8px; background: #f5f5f5; color: #555;">
+                    Checking for a stored session…
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Captured cookies</label>
+                    <textarea id="fkCookiesInput" rows="5" placeholder="T=TI...; Max-Age=...&#10;SN=VIF...; Max-Age=...&#10;at=eyJ...; Version=1;...&#10;rt=eyJ...; Version=1;..." style="width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; font-size: 12px; font-family: monospace; resize: vertical; box-sizing: border-box;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Flipkart phone (optional)</label>
+                    <input type="tel" class="form-input" id="fkPhoneInput" placeholder="10-digit Flipkart account number" maxlength="10">
+                </div>
+                <button class="btn-primary" onclick="importFlipkartSession()" id="fkImportBtn" style="width: 100%;">
+                    <i class="fas fa-plug"></i>
+                    <span>Import &amp; connect live session</span>
+                </button>
+            </div>
         </div>
 
         <!-- Login Page -->
@@ -3795,6 +3823,78 @@
         // PROFILE
         // ====================================================================
 
+        async function refreshFkStatus() {
+            const el = document.getElementById('fkImportStatus');
+            if (!el) return;
+            if (!GATEWAY) { el.textContent = 'Gateway offline — can\'t check Flipkart session.'; return; }
+            try {
+                const res = await fetch(GATEWAY + '/api/v2/status');
+                const data = await res.json();
+                if (data.ok && data.data) {
+                    if (data.data.flipkartConfigured) {
+                        const phone = data.data.sessionPhone ? ' · ' + data.data.sessionPhone : '';
+                        if (data.data.accessTokenExpired) {
+                            el.textContent = '🟡 Session connected but its access token expired — paste a fresh cookie capture from your logged-in Flipkart device to go fully live.';
+                            el.style.background = '#fff8e1';
+                            el.style.color = '#8d6e63';
+                        } else {
+                            el.textContent = '🟢 Live Flipkart session connected' + phone + ' — real data active (search, cart, orders, wallet).';
+                            el.style.background = '#e3f2fd';
+                            el.style.color = '#0d47a1';
+                        }
+                        state.flipkartLive = true;
+                    } else {
+                        el.textContent = '⚪ No live session — paste your captured cookies below, or sign in with OTP (real SMS via Flipkart).';
+                        el.style.background = '#f5f5f5';
+                        el.style.color = '#555';
+                        state.flipkartLive = false;
+                    }
+                }
+            } catch (e) {
+                el.textContent = 'Could not reach gateway — try again later.';
+            }
+        }
+
+        async function importFlipkartSession() {
+            const el = document.getElementById('fkImportStatus');
+            const cookies = (document.getElementById('fkCookiesInput').value || '').trim();
+            const phone = (document.getElementById('fkPhoneInput').value || '').trim();
+            const btn = document.getElementById('fkImportBtn');
+            if (!cookies) {
+                showToast('Paste the captured T / SN / at / rt cookies first', 'error');
+                return;
+            }
+            if (!GATEWAY) { showToast('Gateway offline', 'error'); return; }
+            btn.disabled = true;
+            btn.querySelector('span').textContent = 'Connecting…';
+            try {
+                const res = await fetch(GATEWAY + '/api/v2/session/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cookies: cookies, ...(phone ? { phone: phone } : {}) })
+                });
+                const data = await res.json();
+                if (data.ok && data.data && data.data.ok) {
+                    state.flipkartLive = true;
+                    showToast('Flipkart session connected — live data active!', 'success');
+                    document.getElementById('fkCookiesInput').value = '';
+                    await refreshFkStatus();
+                    checkDataStatus();
+                } else {
+                    const err = (data.data && data.data.error) || data.error || 'Import failed';
+                    showToast(err, 'error');
+                    el.textContent = '❌ ' + err;
+                    el.style.background = '#ffebee';
+                    el.style.color = '#c62828';
+                }
+            } catch (e) {
+                showToast('Could not reach gateway', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.querySelector('span').textContent = 'Import & connect live session';
+            }
+        }
+
         function loadProfile() {
             if (!state.user) {
                 router.navigate('login');
@@ -3802,6 +3902,7 @@
             }
             document.getElementById('profileName').textContent = state.user.name || 'User';
             document.getElementById('profilePhone').textContent = state.user.phone || '';
+            refreshFkStatus();
         }
 
         // ====================================================================

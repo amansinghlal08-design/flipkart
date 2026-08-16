@@ -546,6 +546,158 @@ export const flipkartAuth = action({
 });
 
 // ---------------------------------------------------------------------------
+// Import a captured real-device session (from a HAR / cookie export)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a captured cookie export into known Flipkart session cookies.
+ * Accepts raw Set-Cookie blocks (the "T=...; Max-Age=..." records a browser
+ * extension records) or a plain "k=v; k2=v2" string. Cookie values never
+ * contain spaces or `;`, so scanning for `name=value` pairs is safe.
+ */
+function parseCapturedCookies(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const KNOWN = new Set([
+    "t", "sn", "at", "rt", "ud", "s", "k-action", "securetoken", "vid",
+  ]);
+  const re = /(?:^|[\s;])([A-Za-z0-9_-]+)=([^;\s]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw))) {
+    const name = m[1];
+    const lower = name.toLowerCase();
+    if (!KNOWN.has(lower)) continue;
+    const value = m[2];
+    if (!value || value.toLowerCase() === "null") continue;
+    const key = lower === "t" ? "T" : lower === "sn" ? "SN" : lower === "s" ? "S" : lower;
+    if (out[key] === undefined) out[key] = value;
+  }
+  return out;
+}
+
+/** Pure-JS base64url decode (no Buffer/atob — Convex action runtime safe). */
+function b64urlDecode(s: string): string {
+  const CHARS =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let out = "";
+  let buffer = 0;
+  let bits = 0;
+  for (const c of s) {
+    if (c === "=" ) continue;
+    const v = CHARS.indexOf(c);
+    if (v < 0) continue;
+    buffer = (buffer << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((buffer >> bits) & 0xff);
+    }
+  }
+  return out;
+}
+
+/** Decode the `exp` (epoch seconds) from a Flipkart `at` JWT, if present. */
+function accessTokenExpiry(at: string): number | null {
+  try {
+    const parts = at.split(".");
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(b64urlDecode(parts[1])) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Import a captured real-device session so all data calls go live against
+ * 2.rome.api.flipkart.com with that session's cookies. The device id anchors
+ * to the captured `T` cookie (the `at` JWT's dId claim is exactly the T
+ * value), so the fingerprint matches the session Rome issued it to.
+ */
+export const importFlipkartSession = action({
+  args: {
+    cookies: v.string(), // raw pasted Set-Cookie blocks or "k=v; k2=v2"
+    phone: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { cookies, phone },
+  ): Promise<
+    | { ok: false; error: string; parsed: string[] }
+    | {
+        ok: true;
+        phone: string;
+        deviceId: string;
+        sessionId: string;
+        cookieCount: number;
+        hasAccessToken: boolean;
+        hasRefreshToken: boolean;
+        accessTokenExpiresAt: number | null;
+        accessTokenExpired: boolean;
+        note: string;
+      }
+  > => {
+    const parsed = parseCapturedCookies(cookies);
+    const at = parsed["at"] ?? "";
+    const rt = parsed["rt"] ?? "";
+    const sn = parsed["SN"] ?? parsed["sn"] ?? "";
+    const T = parsed["T"] ?? "";
+    if (!at && !rt && !sn && !T) {
+      return {
+        ok: false,
+        error:
+          "No Flipkart session cookies found — paste the T / SN / at / rt block from your capture.",
+        parsed: Object.keys(parsed),
+      };
+    }
+    const deviceId = T || newDeviceId();
+    const parts = [
+      T ? `T=${T}` : null,
+      sn ? `SN=${sn}` : null,
+      at ? `at=${at}` : null,
+      rt ? `rt=${rt}` : null,
+      parsed["ud"] ? `ud=${parsed["ud"]}` : null,
+      parsed["S"] ? `S=${parsed["S"]}` : null,
+      parsed["k-action"] ? `K-ACTION=${parsed["k-action"]}` : null,
+      parsed["securetoken"] ? `secureToken=${parsed["securetoken"]}` : null,
+      parsed["vid"] ? `vid=${parsed["vid"]}` : null,
+    ].filter((p): p is string => Boolean(p));
+    const atExpiryMs = at ? accessTokenExpiry(at) : null;
+    const targetPhone = (phone ?? "").replace(/\D/g, "") || "captured";
+    const saved = (await ctx.runMutation(
+      api.flipkartProxy.upsertFlipkartSession,
+      {
+        phone: targetPhone,
+        status: "active",
+        accessToken: at || undefined,
+        refreshToken: rt || undefined,
+        sn: sn || undefined,
+        cookies: parts.join("; "),
+        deviceId,
+        dcId: "2",
+        visitId: newVisitId(),
+        sessionId: newSessionId(),
+      },
+    )) as { sessionId: string };
+    return {
+      ok: true,
+      phone: targetPhone,
+      deviceId,
+      sessionId: saved.sessionId,
+      cookieCount: parts.length,
+      hasAccessToken: Boolean(at),
+      hasRefreshToken: Boolean(rt),
+      accessTokenExpiresAt: atExpiryMs,
+      accessTokenExpired: atExpiryMs !== null && atExpiryMs < Date.now(),
+      note: !at
+        ? "Stored with long-lived cookies (T/SN/rt) — no access token in the capture."
+        : atExpiryMs !== null && atExpiryMs < Date.now()
+          ? "Session stored — the access token has expired; re-capture fresh cookies from your logged-in Flipkart device to go live."
+          : "Captured session stored — live Flipkart data is active.",
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 
@@ -554,6 +706,8 @@ export const flipkartStatus = action({
   handler: async (ctx): Promise<{
     configured: boolean;
     sessionPhone: string | null;
+    accessTokenExpiresAt: number | null;
+    accessTokenExpired: boolean;
     channels: {
       accessToken: boolean;
       refreshToken: boolean;
@@ -570,21 +724,27 @@ export const flipkartStatus = action({
     );
     let sessionPhone: string | null = null;
     let sessionActive = false;
+    let sessionAccessToken: string | null = null;
     try {
       const latest = (await ctx.runQuery(api.flipkartProxy.getLatestActiveSession, {})) as {
         phone: string;
         status: string;
+        accessToken?: string;
       } | null;
       if (latest && latest.status === "active") {
         sessionPhone = latest.phone;
         sessionActive = true;
+        sessionAccessToken = latest.accessToken ?? null;
       }
     } catch {
       // query failed — env-only status is still useful
     }
+    const atExpiryMs = sessionAccessToken ? accessTokenExpiry(sessionAccessToken) : null;
     return {
       configured: envConfigured || sessionActive,
       sessionPhone,
+      accessTokenExpiresAt: atExpiryMs,
+      accessTokenExpired: atExpiryMs !== null && atExpiryMs < Date.now(),
       channels: {
         accessToken: Boolean((process.env.FLIPKART_ACCESS_TOKEN ?? "").trim()),
         refreshToken: Boolean((process.env.FLIPKART_REFRESH_TOKEN ?? "").trim()),
@@ -921,9 +1081,24 @@ function extractProducts(payload: unknown): Array<Record<string, unknown>> {
     }
   };
 
-  const slots = (payload as { RESPONSE?: { pageResponse?: { slots?: unknown[] } } })
-    ?.RESPONSE?.pageResponse?.slots;
-  if (Array.isArray(slots)) {
+  const anyPayload = payload as {
+    RESPONSE?: {
+      slots?: unknown[];
+      pageResponse?: { slots?: unknown[] };
+      pageData?: { pageLevelSlots?: Record<string, unknown>; globalSlots?: unknown[] };
+    };
+  };
+  const RESP = anyPayload?.RESPONSE ?? {};
+  // Real HyperLocal responses put slots under RESPONSE.slots and
+  // RESPONSE.pageData.pageLevelSlots / globalSlots (not pageResponse).
+  const slotCollections: unknown[][] = [];
+  if (Array.isArray(RESP.slots)) slotCollections.push(RESP.slots);
+  if (Array.isArray(RESP.pageResponse?.slots)) slotCollections.push(RESP.pageResponse.slots);
+  if (RESP.pageData?.pageLevelSlots && typeof RESP.pageData.pageLevelSlots === "object") {
+    slotCollections.push(Object.values(RESP.pageData.pageLevelSlots));
+  }
+  if (Array.isArray(RESP.pageData?.globalSlots)) slotCollections.push(RESP.pageData.globalSlots);
+  for (const slots of slotCollections) {
     for (const slot of slots) {
       const w = (slot as { widget?: { data?: unknown } })?.widget?.data;
       if (w) walk(w, 0);
