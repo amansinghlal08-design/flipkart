@@ -29,6 +29,16 @@ export function deliveryEta(ts: number): string {
   });
 }
 
+/** Quick-commerce pack label — explicit unit, else parsed from the name. */
+export function unitLabel(name: string, unit?: string): string {
+  if (unit) return unit;
+  const emDash = name.split("—");
+  if (emDash.length > 1) return emDash[emDash.length - 1].trim();
+  const paren = name.match(/\(([^)]+)\)/);
+  if (paren) return paren[1];
+  return "";
+}
+
 /** Deterministic delivery estimate (1–5 days) for a pincode + product id. */
 export function pincodeEta(pincode: string, seed: string): number {
   let hash = 0;

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Bike,
@@ -7,20 +7,32 @@ import {
   Clock,
   Loader2,
   MapPin,
+  Minus,
+  Plus,
   ShoppingBag,
   Zap,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { api as apiClient, useApiResource, type PickupPoint } from "@/lib/apiClient";
-import { inr } from "@/lib/format";
+import { inr, unitLabel } from "@/lib/format";
 import { trackEvent } from "@/lib/telemetry";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type { Doc } from "@/convex/_generated/dataModel";
+
+const CHIPS = [
+  { slug: "all", label: "All" },
+  { slug: "grocery", label: "Groceries" },
+  { slug: "vegetables", label: "Vegetables" },
+  { slug: "fruits", label: "Fruits" },
+  { slug: "dairy", label: "Dairy & Eggs" },
+  { slug: "beverages", label: "Beverages" },
+  { slug: "snacks", label: "Snacks" },
+];
 
 function SectionHeading({
   title,
@@ -41,14 +53,21 @@ function SectionHeading({
 
 function QuickCard({
   product,
+  cartQty,
+  busy,
   onAdd,
-  busyId,
+  onIncrement,
+  onDecrement,
 }: {
   product: Doc<"products">;
-  onAdd: (product: Doc<"products">) => void;
-  busyId: string | null;
+  cartQty: number;
+  busy: boolean;
+  onAdd: () => void;
+  onIncrement: () => void;
+  onDecrement: () => void;
 }) {
   const off = Math.round(((product.mrp - product.price) / product.mrp) * 100);
+  const unit = unitLabel(product.name, product.unit);
   return (
     <div className="group rounded-xl border border-neutral-200 bg-white transition-colors hover:border-neutral-400">
       <Link to={`/product/${product._id}`} className="block p-3 pb-1">
@@ -65,8 +84,9 @@ function QuickCard({
           )}
         </div>
         <p className="mt-2 line-clamp-2 text-[13px] font-medium leading-5 text-neutral-900 group-hover:underline group-hover:underline-offset-4">
-          {product.name}
+          {product.name.replace(/ — .*$/, "")}
         </p>
+        {unit && <p className="mt-0.5 text-[12px] text-neutral-500">{unit}</p>}
         <p className="mt-1 text-sm font-semibold tracking-tight text-neutral-900">
           {inr(product.price)}{" "}
           <span className="text-xs font-normal text-neutral-400 line-through">
@@ -75,24 +95,50 @@ function QuickCard({
         </p>
       </Link>
       <div className="p-3 pt-1">
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full rounded-full border-neutral-300 text-[13px]"
-          disabled={product.stock <= 0 || busyId === product._id}
-          onClick={() => onAdd(product)}
-        >
-          {busyId === product._id ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : product.stock <= 0 ? (
-            "Out of stock"
-          ) : (
-            <>
-              <ShoppingBag className="h-3.5 w-3.5" />
-              Add in a tap
-            </>
-          )}
-        </Button>
+        {cartQty > 0 ? (
+          <div className="flex items-center justify-between rounded-full border border-neutral-900">
+            <button
+              type="button"
+              aria-label="Decrease quantity"
+              disabled={busy}
+              onClick={onDecrement}
+              className="grid h-9 w-9 place-items-center rounded-full text-neutral-900 transition-colors hover:bg-neutral-100 disabled:opacity-40"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span className="text-sm font-semibold tabular-nums text-neutral-900">
+              {cartQty}
+            </span>
+            <button
+              type="button"
+              aria-label="Increase quantity"
+              disabled={busy}
+              onClick={onIncrement}
+              className="grid h-9 w-9 place-items-center rounded-full text-neutral-900 transition-colors hover:bg-neutral-100 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full rounded-full border-neutral-300 text-[13px]"
+            disabled={product.stock <= 0 || busy}
+            onClick={onAdd}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : product.stock <= 0 ? (
+              "Out of stock"
+            ) : (
+              <>
+                <ShoppingBag className="h-3.5 w-3.5" />
+                Add in a tap
+              </>
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -138,19 +184,16 @@ function PickupRow({ point }: { point: PickupPoint }) {
 export default function Minutes() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const addToCart = useMutation(api.cart.addToCart);
+  const [chip, setChip] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const grocery = useApiResource(
-    useCallback(() => apiClient.search({ category: "grocery" }), []),
-    undefined,
-  );
-  const beauty = useApiResource(
-    useCallback(() => apiClient.search({ category: "beauty" }), []),
-    undefined,
-  );
-  const kitchen = useApiResource(
-    useCallback(() => apiClient.search({ category: "kitchen" }), []),
+  const addToCart = useMutation(api.cart.addToCart);
+  const updateCartItem = useMutation(api.cart.updateCartItem);
+  const removeFromCart = useMutation(api.cart.removeFromCart);
+  const cart = useQuery(api.cart.getCart);
+
+  const catalog = useApiResource(
+    useCallback(() => apiClient.minutesCatalog(), []),
     undefined,
   );
   const flash = useApiResource(
@@ -162,16 +205,31 @@ export default function Minutes() {
     undefined,
   );
 
-  const groceryList = grocery.data ?? [];
-  const beautyList = beauty.data ?? [];
-  const kitchenList = kitchen.data ?? [];
+  const items = catalog.data?.items ?? [];
+  const trending = catalog.data?.trending ?? [];
   const points = pickup.data ?? [];
 
-  const handleAdd = async (product: Doc<"products">) => {
-    if (!isAuthenticated) {
-      navigate(`/auth?returnTo=/minutes`);
-      return;
+  const filtered = useMemo(
+    () => (chip === "all" ? items : items.filter((p) => p.category === chip)),
+    [items, chip],
+  );
+
+  const cartQty = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of cart ?? []) {
+      map.set(entry.product._id, entry.item.quantity);
     }
+    return map;
+  }, [cart]);
+
+  const requireAuth = () => {
+    if (isAuthenticated) return true;
+    navigate(`/auth?returnTo=/minutes`);
+    return false;
+  };
+
+  const handleAdd = async (product: Doc<"products">) => {
+    if (!requireAuth()) return;
     setBusyId(product._id);
     try {
       await addToCart({ productId: product._id, quantity: 1 });
@@ -186,7 +244,6 @@ export default function Minutes() {
         },
         "/minutes",
       );
-      toast.success("Added to cart");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add to cart.");
     } finally {
@@ -194,7 +251,51 @@ export default function Minutes() {
     }
   };
 
-  const grid = "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4";
+  const handleIncrement = async (product: Doc<"products">) => {
+    const entry = (cart ?? []).find((e) => e.product._id === product._id);
+    if (!entry) {
+      await handleAdd(product);
+      return;
+    }
+    setBusyId(product._id);
+    try {
+      await updateCartItem({ itemId: entry.item._id, quantity: entry.item.quantity + 1 });
+      trackEvent("update_cart", {
+        item_id: product._id,
+        quantity: entry.item.quantity + 1,
+        source: "minutes",
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update cart.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDecrement = async (product: Doc<"products">) => {
+    const entry = (cart ?? []).find((e) => e.product._id === product._id);
+    if (!entry) return;
+    setBusyId(product._id);
+    try {
+      if (entry.item.quantity <= 1) {
+        await removeFromCart({ itemId: entry.item._id });
+        trackEvent("remove_from_cart", { item_id: product._id, source: "minutes" });
+      } else {
+        await updateCartItem({ itemId: entry.item._id, quantity: entry.item.quantity - 1 });
+        trackEvent("update_cart", {
+          item_id: product._id,
+          quantity: entry.item.quantity - 1,
+          source: "minutes",
+        });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update cart.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const grid = "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5";
 
   return (
     <div>
@@ -213,7 +314,7 @@ export default function Minutes() {
                 in about ten minutes.
               </h1>
               <p className="mt-5 max-w-md text-sm leading-7 text-neutral-400">
-                Grocery, home and beauty essentials picked from a store near you
+                Grocery, dairy, fruit and snacks picked from a store near you
                 and delivered by bike — no minimum order, no waiting.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -256,36 +357,91 @@ export default function Minutes() {
         </div>
       </section>
 
-      {/* Pickup points */}
-      <section id="stores" className="border-b border-neutral-200/80">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
-          <SectionHeading
-            title="Stores near you"
-            apiNote={
-              pickup.source === "api"
-                ? `GET /api/v2/locations/pickup-points · ${pickup.latencyMs}ms`
-                : "GET /api/v2/locations/pickup-points"
-            }
-          />
-          {points.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {points.map((point) => (
-                <PickupRow key={point.id} point={point} />
-              ))}
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-28 animate-pulse rounded-xl bg-neutral-100" />
-              ))}
-            </div>
-          )}
+      {/* Essentials — chips + grid */}
+      <section id="essentials" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+        <SectionHeading
+          title="Everything, in minutes"
+          apiNote={
+            catalog.source === "api"
+              ? `GET /api/v2/minutes/catalog · ${catalog.latencyMs}ms`
+              : "GET /api/v2/minutes/catalog"
+          }
+        />
+
+        {/* Category chips */}
+        <div className="mb-6 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {CHIPS.map((c) => (
+            <button
+              key={c.slug}
+              type="button"
+              onClick={() => setChip(c.slug)}
+              className={cn(
+                "shrink-0 rounded-full border px-4 py-1.5 text-[13px] transition-colors",
+                chip === c.slug
+                  ? "border-neutral-900 bg-neutral-900 text-white"
+                  : "border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400",
+              )}
+            >
+              {c.label}
+            </button>
+          ))}
         </div>
+
+        {filtered.length > 0 ? (
+          <div className={grid}>
+            {filtered.map((product) => (
+              <QuickCard
+                key={product._id}
+                product={product}
+                cartQty={cartQty.get(product._id) ?? 0}
+                busy={busyId === product._id}
+                onAdd={() => handleAdd(product)}
+                onIncrement={() => handleIncrement(product)}
+                onDecrement={() => handleDecrement(product)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className={grid}>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="h-56 animate-pulse rounded-xl bg-neutral-100" />
+            ))}
+          </div>
+        )}
       </section>
+
+      {/* Trending rail */}
+      {trending.length > 0 && (
+        <section className="border-y border-neutral-200/80 bg-neutral-50/60">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
+            <SectionHeading
+              title="Trending now"
+              apiNote={
+                catalog.source === "api"
+                  ? "GET /api/v2/minutes/catalog (trending)"
+                  : "GET /api/v2/minutes/catalog"
+              }
+            />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {trending.map((product) => (
+                <QuickCard
+                  key={product._id}
+                  product={product}
+                  cartQty={cartQty.get(product._id) ?? 0}
+                  busy={busyId === product._id}
+                  onAdd={() => handleAdd(product)}
+                  onIncrement={() => handleIncrement(product)}
+                  onDecrement={() => handleDecrement(product)}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Flash rail */}
       {flash.data && flash.data.length > 0 && (
-        <section className="border-b border-neutral-200/80 bg-neutral-50/60">
+        <section className="border-b border-neutral-200/80">
           <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
             <SectionHeading
               title="Flying off the shelves"
@@ -326,92 +482,27 @@ export default function Minutes() {
         </section>
       )}
 
-      {/* Essentials */}
-      <section id="essentials" className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
-        <SectionHeading
-          title="Grocery & pantry"
-          apiNote={
-            grocery.source === "api"
-              ? `GET /api/v2/search?category=grocery · ${grocery.latencyMs}ms`
-              : "GET /api/v2/search?category=grocery"
-          }
-        />
-        {groceryList.length > 0 ? (
-          <div className={grid}>
-            {groceryList.map((product) => (
-              <QuickCard
-                key={product._id}
-                product={product}
-                onAdd={handleAdd}
-                busyId={busyId}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className={grid}>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-56 animate-pulse rounded-xl bg-neutral-100" />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="border-t border-neutral-200/80">
+      {/* Pickup points */}
+      <section id="stores" className="border-b border-neutral-200/80">
         <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
           <SectionHeading
-            title="Beauty & self-care"
+            title="Stores near you"
             apiNote={
-              beauty.source === "api"
-                ? `GET /api/v2/search?category=beauty · ${beauty.latencyMs}ms`
-                : "GET /api/v2/search?category=beauty"
+              pickup.source === "api"
+                ? `GET /api/v2/locations/pickup-points · ${pickup.latencyMs}ms`
+                : "GET /api/v2/locations/pickup-points"
             }
           />
-          {beautyList.length > 0 ? (
-            <div className={grid}>
-              {beautyList.map((product) => (
-                <QuickCard
-                  key={product._id}
-                  product={product}
-                  onAdd={handleAdd}
-                  busyId={busyId}
-                />
+          {points.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {points.map((point) => (
+                <PickupRow key={point.id} point={point} />
               ))}
             </div>
           ) : (
-            <div className={grid}>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-56 animate-pulse rounded-xl bg-neutral-100" />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="border-t border-neutral-200/80">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
-          <SectionHeading
-            title="Kitchen essentials"
-            apiNote={
-              kitchen.source === "api"
-                ? `GET /api/v2/search?category=kitchen · ${kitchen.latencyMs}ms`
-                : "GET /api/v2/search?category=kitchen"
-            }
-          />
-          {kitchenList.length > 0 ? (
-            <div className={grid}>
-              {kitchenList.map((product) => (
-                <QuickCard
-                  key={product._id}
-                  product={product}
-                  onAdd={handleAdd}
-                  busyId={busyId}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className={grid}>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-56 animate-pulse rounded-xl bg-neutral-100" />
+            <div className="grid gap-4 sm:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-28 animate-pulse rounded-xl bg-neutral-100" />
               ))}
             </div>
           )}
@@ -419,7 +510,7 @@ export default function Minutes() {
       </section>
 
       {/* Trust strip */}
-      <section className="border-t border-neutral-200/80 bg-neutral-50/60">
+      <section className="bg-neutral-50/60">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="grid gap-6 sm:grid-cols-3">
             {[
@@ -439,8 +530,8 @@ export default function Minutes() {
             ))}
           </div>
           <p className="mt-10 text-center font-mono text-[11px] text-neutral-400">
-            {flash.source === "api" || pickup.source === "api" || grocery.source === "api"
-              ? "Minutes storefront served via the REST gateway — search, flash-sales & pickup-points endpoints."
+            {catalog.source === "api" || pickup.source === "api" || flash.source === "api"
+              ? "Minutes storefront served via the REST gateway — minutes/catalog, flash-sales & pickup-points endpoints."
               : "REST gateway unavailable — serving from Convex."}
           </p>
         </div>

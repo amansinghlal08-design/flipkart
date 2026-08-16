@@ -12,6 +12,8 @@ import {
   Heart,
   Package as PackageIcon,
   Zap,
+  House,
+  CircleUserRound,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
@@ -283,6 +285,74 @@ function Header() {
   );
 }
 
+function BottomNav() {
+  const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
+  const cart = useQuery(api.cart.getCart);
+  const cartCount = (cart ?? []).reduce((sum, entry) => sum + entry.item.quantity, 0);
+
+  const items = [
+    {
+      label: "Home",
+      to: "/",
+      icon: House,
+      active: location.pathname === "/",
+    },
+    {
+      label: "Shop",
+      to: "/shop",
+      icon: Search,
+      active: location.pathname === "/shop",
+    },
+    {
+      label: "Minutes",
+      to: "/minutes",
+      icon: Zap,
+      active: location.pathname === "/minutes",
+    },
+    {
+      label: "Cart",
+      to: "/cart",
+      icon: ShoppingBag,
+      active: location.pathname === "/cart",
+      badge: cartCount,
+    },
+    {
+      label: isAuthenticated ? (user?.name?.charAt(0) ?? "Account") : "Account",
+      to: isAuthenticated ? "/account" : "/auth",
+      icon: CircleUserRound,
+      active: location.pathname === "/account",
+    },
+  ];
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      <div className="flex">
+        {items.map((item) => (
+          <Link
+            key={item.label}
+            to={item.to}
+            className={cn(
+              "relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] transition-colors",
+              item.active ? "font-medium text-neutral-900" : "text-neutral-400",
+            )}
+          >
+            <span className="relative">
+              <item.icon className="h-5 w-5" />
+              {item.badge ? (
+                <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-neutral-900 px-1 text-[9px] font-medium leading-none text-white">
+                  {item.badge > 99 ? "99+" : item.badge}
+                </span>
+              ) : null}
+            </span>
+            {item.label}
+          </Link>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
 function Footer() {
   const categories = useQuery(api.products.listCategories);
   const shopLinks = (categories ?? []).slice(0, 4);
@@ -405,10 +475,11 @@ export function StoreLayout() {
   return (
     <div className="flex min-h-screen flex-col bg-white text-neutral-900 antialiased">
       <Header />
-      <main className="flex-1">
+      <main className="flex-1 pb-16 md:pb-0">
         <Outlet />
       </main>
       <Footer />
+      <BottomNav />
     </div>
   );
 }

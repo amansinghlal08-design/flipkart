@@ -1010,6 +1010,68 @@ export function registerV2ApiRoutes(http: Router): void {
       }),
   });
 
+  // ---------- Minutes (quick-commerce) catalogue ----------
+  const MINUTES_SLUGS = [
+    "grocery",
+    "vegetables",
+    "fruits",
+    "dairy",
+    "beverages",
+    "snacks",
+  ];
+
+  addRoute(http, {
+    path: "/api/v2/minutes/catalog",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/minutes/catalog", method: "GET" };
+      const url = new URL(request.url);
+      const category = url.searchParams.get("category") ?? undefined;
+      let categories = await ctx.runQuery(api.products.listCategories, {});
+      let products = await ctx.runQuery(api.products.listProducts, {
+        sort: "featured",
+      });
+      let minutesItems = products.filter((p) =>
+        MINUTES_SLUGS.includes(p.category),
+      );
+      // Self-healing: seed the quick-commerce catalogue on first access so the
+      // endpoint always serves the full minutes surface, even before the UI
+      // has triggered the seed mutation. "dairy" only exists in the minutes
+      // catalogue, so its absence means the minutes seed hasn't run yet.
+      if (!products.some((p) => p.category === "dairy")) {
+        await ctx
+          .runMutation(api.seed.ensureMinutesCatalog, {})
+          .catch(() => undefined);
+        [categories, products] = await Promise.all([
+          ctx.runQuery(api.products.listCategories, {}),
+          ctx.runQuery(api.products.listProducts, { sort: "featured" }),
+        ]);
+        minutesItems = products.filter((p) =>
+          MINUTES_SLUGS.includes(p.category),
+        );
+      }
+      const minutesCategories = categories.filter((c) =>
+        MINUTES_SLUGS.includes(c.slug),
+      );
+      const filtered = category
+        ? minutesItems.filter((p) => p.category === category)
+        : minutesItems;
+      const trending = [...minutesItems]
+        .sort((a, b) => b.rating - a.rating)
+        .slice(0, 6);
+      return ok(
+        ref,
+        {
+          categories: minutesCategories,
+          items: filtered,
+          trending,
+          category: category ?? "all",
+        },
+        { count: filtered.length, total: minutesItems.length },
+      );
+    },
+  });
+
   // ---------- Telemetry / analytics collector ----------
   addRoute(http, {
     path: "/api/v2/analytics/events",

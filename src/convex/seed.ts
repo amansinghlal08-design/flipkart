@@ -848,3 +848,119 @@ export const ensureSeed = mutation({
     return { seeded: true, products: PRODUCTS.length };
   },
 });
+
+// --------------------------------------------------------------------------
+// Minutes (quick-commerce) catalogue — runs on top of the main seed so a
+// live deployment picks it up without wiping existing data. Idempotent.
+// --------------------------------------------------------------------------
+
+const MINUTES_CATEGORIES: { slug: string; name: string; icon: string }[] = [
+  { slug: "vegetables", name: "Vegetables", icon: "Carrot" },
+  { slug: "fruits", name: "Fruits", icon: "Apple" },
+  { slug: "dairy", name: "Dairy & Eggs", icon: "Milk" },
+  { slug: "beverages", name: "Beverages", icon: "Coffee" },
+  { slug: "snacks", name: "Snacks", icon: "Cookie" },
+];
+
+type MinutesProduct = {
+  name: string;
+  brand: string;
+  category: string;
+  unit: string;
+  price: number;
+  mrp: number;
+  rating: number;
+  ratingCount: number;
+  stock: number;
+  badges: string[];
+  tags: string[];
+};
+
+const MINUTES_PRODUCTS: MinutesProduct[] = [
+  // ---- dairy ----
+  { name: "Fresh Milk — 1 L", brand: "DairyPure", category: "dairy", unit: "1 L", price: 68, mrp: 72, rating: 4.5, ratingCount: 14210, stock: 240, badges: ["Minutes"], tags: ["milk", "dairy", "minutes"] },
+  { name: "Cultured Curd — 400 g", brand: "DairyPure", category: "dairy", unit: "400 g", price: 45, mrp: 52, rating: 4.3, ratingCount: 6310, stock: 180, badges: [], tags: ["curd", "dairy", "minutes"] },
+  { name: "Table Butter — 100 g", brand: "DairyPure", category: "dairy", unit: "100 g", price: 52, mrp: 58, rating: 4.4, ratingCount: 8210, stock: 150, badges: [], tags: ["butter", "dairy", "minutes"] },
+  { name: "Paneer Block — 200 g", brand: "DairyPure", category: "dairy", unit: "200 g", price: 89, mrp: 99, rating: 4.2, ratingCount: 4110, stock: 90, badges: ["Minutes"], tags: ["paneer", "dairy", "minutes"] },
+  { name: "Farm Eggs — 12 pcs", brand: "Sunrise Farms", category: "dairy", unit: "12 pcs", price: 95, mrp: 110, rating: 4.6, ratingCount: 18340, stock: 320, badges: ["Best Seller"], tags: ["eggs", "dairy", "minutes"] },
+
+  // ---- groceries ----
+  { name: "Soft Brown Bread — 400 g", brand: "Fieldstone", category: "grocery", unit: "400 g", price: 45, mrp: 50, rating: 4.3, ratingCount: 9210, stock: 140, badges: [], tags: ["bread", "bakery", "minutes"] },
+  { name: "Whole Wheat Atta — 5 kg", brand: "Fieldstone", category: "grocery", unit: "5 kg", price: 215, mrp: 245, rating: 4.5, ratingCount: 11200, stock: 110, badges: [], tags: ["atta", "flour", "minutes"] },
+  { name: "Toor Dal — 1 kg", brand: "Fieldstone", category: "grocery", unit: "1 kg", price: 165, mrp: 190, rating: 4.4, ratingCount: 7430, stock: 160, badges: ["Minutes"], tags: ["dal", "pulses", "minutes"] },
+
+  // ---- vegetables ----
+  { name: "Tomatoes — 500 g", brand: "FarmFresh", category: "vegetables", unit: "500 g", price: 35, mrp: 42, rating: 4.2, ratingCount: 5120, stock: 200, badges: [], tags: ["tomato", "vegetable", "minutes"] },
+  { name: "Potatoes — 1 kg", brand: "FarmFresh", category: "vegetables", unit: "1 kg", price: 42, mrp: 48, rating: 4.3, ratingCount: 8930, stock: 260, badges: [], tags: ["potato", "vegetable", "minutes"] },
+  { name: "Onions — 1 kg", brand: "FarmFresh", category: "vegetables", unit: "1 kg", price: 38, mrp: 45, rating: 4.2, ratingCount: 7740, stock: 230, badges: ["Minutes"], tags: ["onion", "vegetable", "minutes"] },
+  { name: "Green Peas — 500 g", brand: "FarmFresh", category: "vegetables", unit: "500 g", price: 55, mrp: 65, rating: 4.1, ratingCount: 3180, stock: 120, badges: [], tags: ["peas", "vegetable", "minutes"] },
+
+  // ---- fruits ----
+  { name: "Bananas — 6 pcs", brand: "FarmFresh", category: "fruits", unit: "6 pcs", price: 55, mrp: 65, rating: 4.4, ratingCount: 14320, stock: 300, badges: ["Best Seller"], tags: ["banana", "fruit", "minutes"] },
+  { name: "Shimla Apples — 500 g", brand: "FarmFresh", category: "fruits", unit: "500 g", price: 120, mrp: 140, rating: 4.5, ratingCount: 9830, stock: 130, badges: [], tags: ["apple", "fruit", "minutes"] },
+  { name: "Alphonso Mangoes — 1 kg", brand: "FarmFresh", category: "fruits", unit: "1 kg", price: 149, mrp: 180, rating: 4.6, ratingCount: 6520, stock: 80, badges: ["Minutes"], tags: ["mango", "fruit", "minutes"] },
+
+  // ---- beverages ----
+  { name: "Cold Coffee — 500 ml", brand: "BrewWorks", category: "beverages", unit: "500 ml", price: 89, mrp: 99, rating: 4.3, ratingCount: 4210, stock: 190, badges: [], tags: ["coffee", "beverage", "minutes"] },
+  { name: "Green Tea — 25 bags", brand: "BrewWorks", category: "beverages", unit: "25 bags", price: 145, mrp: 165, rating: 4.4, ratingCount: 5110, stock: 140, badges: [], tags: ["tea", "beverage", "minutes"] },
+  { name: "Orange Juice — 1 L", brand: "BrewWorks", category: "beverages", unit: "1 L", price: 110, mrp: 125, rating: 4.2, ratingCount: 6240, stock: 170, badges: ["Minutes"], tags: ["juice", "beverage", "minutes"] },
+
+  // ---- snacks ----
+  { name: "Masala Chips — 78 g", brand: "SnackCo", category: "snacks", unit: "78 g", price: 20, mrp: 25, rating: 4.1, ratingCount: 15240, stock: 400, badges: [], tags: ["chips", "snack", "minutes"] },
+  { name: "Choco Cookies — 300 g", brand: "SnackCo", category: "snacks", unit: "300 g", price: 95, mrp: 110, rating: 4.3, ratingCount: 8330, stock: 220, badges: [], tags: ["cookies", "snack", "minutes"] },
+  { name: "Peanut Butter — 350 g", brand: "SnackCo", category: "snacks", unit: "350 g", price: 215, mrp: 240, rating: 4.5, ratingCount: 4910, stock: 110, badges: ["Minutes"], tags: ["peanut butter", "snack", "minutes"] },
+];
+
+export const ensureMinutesCatalog = mutation({
+  args: {},
+  handler: async (ctx) => {
+    let added = 0;
+
+    // categories (only if absent)
+    const existingCategories = await ctx.db.query("categories").collect();
+    const slugs = new Set(existingCategories.map((c) => c.slug));
+    for (const [index, category] of MINUTES_CATEGORIES.entries()) {
+      if (!slugs.has(category.slug)) {
+        await ctx.db.insert("categories", {
+          slug: category.slug,
+          name: category.name,
+          icon: category.icon,
+          order: 100 + index,
+        });
+      }
+    }
+
+    // products (only if absent, matched by exact name)
+    const existingProducts = await ctx.db.query("products").collect();
+    const names = new Set(existingProducts.map((p) => p.name));
+    const now = Date.now();
+
+    for (const [index, product] of MINUTES_PRODUCTS.entries()) {
+      if (names.has(product.name)) continue;
+      await ctx.db.insert("products", {
+        name: product.name,
+        brand: product.brand,
+        category: product.category,
+        description: `${product.brand} ${product.name.replace(/ — .*$/, "")} — delivered in minutes, picked fresh.`,
+        highlights: [
+          `Pack size: ${product.unit}`,
+          "Picked fresh from the nearest store",
+          "Delivered in ~10 minutes",
+          "7-day no-questions returns",
+        ],
+        price: product.price,
+        mrp: product.mrp,
+        rating: product.rating,
+        ratingCount: product.ratingCount,
+        stock: product.stock,
+        badges: product.badges,
+        tags: product.tags,
+        unit: product.unit,
+        createdAt: now - index * 1000,
+      });
+      added += 1;
+    }
+
+    return { added, products: MINUTES_PRODUCTS.length };
+  },
+});

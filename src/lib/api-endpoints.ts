@@ -153,6 +153,9 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
   def({ id: 70, method: "POST", endpoint: "/api/v2/analytics/events", category: "Telemetry", purpose: "Persist a client event (views, clicks, conversions)", priority: "Medium", captured: false, impl: "live", sampleBody: { event: "add_to_cart", path: "/product/x", props: { item_name: "Nova X5", price: 21999 } }, note: "In-app stand-in for 1.sonic.fdp.api.flipkart.com/4/data/collector/business — events are persisted to Convex." }),
   def({ id: 71, method: "GET", endpoint: "/api/v2/analytics/events", category: "Telemetry", purpose: "Fetch recent captured events", priority: "Low", captured: false, impl: "live", note: "?limit=N — powers the live event feed on this page." }),
 
+  // ---------- MINUTES (quick commerce) ----------
+  def({ id: 72, method: "GET", endpoint: "/api/v2/minutes/catalog", category: "Minutes", purpose: "Quick-commerce catalogue (categories, items, trending)", priority: "High", captured: false, impl: "live", note: "?category=dairy|vegetables|fruits|beverages|snacks|grocery — powers the /minutes storefront." }),
+
   // ---------- NOTIFICATIONS ----------
   def({ id: 55, method: "POST", endpoint: "/api/1/connekt/push/callback", category: "Notifications", purpose: "Push notification delivery callback", priority: "Low", captured: true, impl: "live", sampleBody: { event: "delivered" } }),
   def({ id: 56, method: "GET", endpoint: "/api/v2/notifications", category: "Notifications", purpose: "Get notification history", priority: "Medium", captured: false, impl: "live" }),

@@ -67,6 +67,7 @@ const schema = defineSchema(
       stock: v.number(),
       badges: v.array(v.string()),
       tags: v.array(v.string()),
+      unit: v.optional(v.string()), // quick-commerce pack size, e.g. "1 L", "500 g"
       createdAt: v.number(),
     })
       .index("by_category", ["category"])

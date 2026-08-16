@@ -95,8 +95,19 @@ export type PageContent = {
   catalogSize: number;
 };
 
+export type MinutesCatalog = {
+  categories: Doc<"categories">[];
+  items: Doc<"products">[];
+  trending: Doc<"products">[];
+  category: string;
+};
+
 export const api = {
   pageContent: () => request<PageContent>("/api/4/page/fetch"),
+  minutesCatalog: (category?: string) =>
+    request<MinutesCatalog>(
+      `/api/v2/minutes/catalog${category ? `?category=${encodeURIComponent(category)}` : ""}`,
+    ),
   search: (params: SearchParams) =>
     request<Doc<"products">[]>(`/api/v2/search?${qs(params)}`),
   suggestions: (q: string) =>
