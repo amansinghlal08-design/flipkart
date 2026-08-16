@@ -1825,6 +1825,7 @@
             pendingPhone: '',
             location: null,
             otpCode: null,
+            flipkartPending: false,
             flipkartLive: false,
             isLoading: false,
             dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
@@ -2291,6 +2292,12 @@
                     // login actually works.
                     if (data.meta && data.meta.demoCode) {
                         state.otpCode = String(data.meta.demoCode);
+                        state.flipkartPending = false;
+                    }
+                    if (data.meta && data.meta.flipkartSession === 'pending') {
+                        // Real Flipkart SMS sent — the code arrives on the phone.
+                        state.otpCode = null;
+                        state.flipkartPending = true;
                     }
                 }
                 showOtpStep();
@@ -2307,10 +2314,17 @@
         function showOtpStep() {
             document.getElementById('phoneStep').style.display = 'none';
             document.getElementById('otpStep').style.display = 'block';
-            // Show the demo code returned by the gateway (no email key configured)
+            // Real Flipkart session flow: SMS arrives from Flipkart itself.
             const banner = document.getElementById('otpDemoBanner');
             const codeEl = document.getElementById('otpDemoCode');
-            if (banner && codeEl && state.otpCode) {
+            if (banner && codeEl && state.flipkartPending) {
+                banner.innerHTML = '<i class="fas fa-shield-halved"></i> Flipkart sent a real SMS to <b>+91 ' +
+                    state.pendingPhone + '</b> — enter the code from your phone to create a live session.';
+                banner.style.background = '#e3f2fd';
+                banner.style.color = '#0d47a1';
+                banner.style.border = '1px solid #2874f0';
+                banner.style.display = 'block';
+            } else if (banner && codeEl && state.otpCode) {
                 codeEl.textContent = state.otpCode;
                 banner.style.display = 'block';
             }
@@ -2364,8 +2378,14 @@
             storage.setUser(state.user);
             loadCartFromStorage();
             updateAuthUI();
-            track('login', { method: 'phone_otp', phone: state.pendingPhone });
-            showToast('Login successful!', 'success');
+            track('login', { method: 'phone_otp', phone: state.pendingPhone, flipkartSession: !!state.flipkartPending });
+            // If this login created a real Flipkart session, the data source flips live.
+            if (state.flipkartPending) {
+                checkDataStatus();
+                showToast('Login successful — Flipkart live session created!', 'success');
+            } else {
+                showToast('Login successful!', 'success');
+            }
             router.navigate('home');
         }
 

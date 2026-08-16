@@ -26,33 +26,64 @@ function requestId(): string {
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+type HttpCtx = Parameters<Parameters<typeof httpAction>[0]>[0];
+
+/**
+ * Raw Flipkart proxy call. Resolves credentials automatically (stored real
+ * session for `phone`, else env vars, else the latest stored session).
+ */
+async function flipkartRequest(
+  ctx: HttpCtx,
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  phone?: string,
+): Promise<{
+  configured: boolean;
+  ok: boolean;
+  status: number;
+  data?: unknown;
+  error?: string;
+  session?: { phone?: string; accessToken?: string; refreshToken?: string; cookies?: string } | null;
+}> {
+  return (await ctx.runAction(api.flipkartProxy.proxyFlipkart, {
+    method,
+    path,
+    body,
+    phone,
+  } as never)) as never;
+}
+
 /**
  * Optional passthrough to the real Flipkart mobile API (2.rome.api.flipkart.com).
  * Every captured route below tries the live API first via `tryFlipkart` and
  * falls back to the in-app mirror when no session creds are configured.
  * Returns a gateway Response when Flipkart creds are configured AND the
  * upstream answers; returns null so the caller falls back to the in-app mirror.
- * `forwardHeaders` lets the response carry Flipkart's own tracking headers.
  */
 async function tryFlipkart(
-  ctx: Parameters<Parameters<typeof httpAction>[0]>[0],
+  ctx: HttpCtx,
   ref: Ref,
   method: string,
   path: string,
   body?: Record<string, unknown>,
 ): Promise<Response | null> {
-  const result = await ctx.runAction(api.flipkartProxy.proxyFlipkart, {
-    method,
-    path,
-    body,
-  } as never);
+  const result = await flipkartRequest(ctx, method, path, body);
   if (!result.configured) return null; // no creds → mirror
   if (!result.ok || result.status >= 500) {
     // Upstream error — fall back to the mirror rather than fail the page.
     return null;
   }
   const source = "flipkart-live";
-  return ok(ref, { proxy: true, flipkart: result.data }, { source, upstreamStatus: result.status });
+  return ok(
+    ref,
+    { proxy: true, flipkart: result.data },
+    {
+      source,
+      upstreamStatus: result.status,
+      ...(result.session?.phone ? { sessionPhone: result.session.phone } : {}),
+    },
+  );
 }
 
 function reply(
@@ -206,9 +237,45 @@ export function registerApiRoutes(http: Router): void {
         );
       }
 
-      // OTP generation stays on our stack: a code Flipkart generates can't be
-      // verified against our session store, so delivery is real Twilio SMS
-      // when TWILIO keys are set, or an on-screen demo code otherwise.
+      // Real device session flow: when Flipkart creds or a stored session
+      // exist, forward the generate to Flipkart so the REAL SMS is sent, and
+      // open a pending session row so verification captures the real tokens.
+      // Otherwise fall back to our own OTP stack (Twilio SMS or demo code).
+      const flipkartResult = await flipkartRequest(
+        ctx,
+        "POST",
+        "/api/7/user/otp/generate",
+        {
+          phone: phoneDigits || undefined,
+          email: emailStr.includes("@") ? emailStr : undefined,
+        },
+        phoneDigits || undefined,
+      );
+      if (flipkartResult.configured && flipkartResult.ok && flipkartResult.status < 500) {
+        if (phoneDigits) {
+          await ctx
+            .runMutation(api.flipkartProxy.upsertFlipkartSession, {
+              phone: phoneDigits,
+              status: "pending",
+            })
+            .catch(() => undefined);
+        }
+        return ok(
+          ref,
+          {
+            sent: true,
+            identifier: phoneDigits || emailStr,
+            channel: "sms",
+            delivered: true,
+            flipkart: true,
+          },
+          {
+            flipkartSession: "pending",
+            upstreamStatus: flipkartResult.status,
+            note: "Flipkart sent the code to your phone — enter it to create a real device session.",
+          },
+        );
+      }
       const result = await ctx.runAction(api.otp.sendOtp, {
         phone: phoneDigits || undefined,
         email: emailStr.includes("@") ? emailStr : undefined,
@@ -252,6 +319,51 @@ export function registerApiRoutes(http: Router): void {
       const identifier = phoneStr || emailStr;
       if (!identifier || typeof otp !== "string") {
         return bad(ref, 400, "invalid_body", "Send { phone, otp } or { email, otp } in the request body.");
+      }
+
+      // Real device session: a pending/active Flipkart session exists for
+      // this phone — verify with Flipkart directly. On success it returns
+      // the real session tokens, which we store and use for all live data.
+      if (phoneStr) {
+        const session = await ctx
+          .runQuery(api.flipkartProxy.getSessionByPhone, { phone: phoneStr })
+          .catch(() => null);
+        if (session) {
+          const fk = await flipkartRequest(
+            ctx,
+            "POST",
+            "/api/1/user/login/otp",
+            { phone: phoneStr, otp },
+            phoneStr,
+          );
+          if (fk.configured && fk.ok && fk.status < 500) {
+            await ctx
+              .runMutation(api.flipkartProxy.upsertFlipkartSession, {
+                phone: phoneStr,
+                status: "active",
+                accessToken: fk.session?.accessToken,
+                refreshToken: fk.session?.refreshToken,
+                cookies: fk.session?.cookies,
+              })
+              .catch(() => undefined);
+            return ok(
+              ref,
+              { identifier: phoneStr, verified: true, flipkart: true },
+              {
+                flipkartSession: "active",
+                note: "Real Flipkart device session created — live data is now served from 2.rome.api.flipkart.com.",
+              },
+            );
+          }
+          // Flipkart rejected the code (or is unreachable) — hard fail rather
+          // than fall through to the any-code demo path.
+          return bad(
+            ref,
+            400,
+            "invalid_otp",
+            "The code you entered is incorrect or has expired.",
+          );
+        }
       }
       const result = await ctx.runMutation(api.otp.verifyOtp, {
         identifier,

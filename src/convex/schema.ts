@@ -184,6 +184,24 @@ const schema = defineSchema(
       .index("by_email", ["email"])
       .index("by_created", ["createdAt"]),
 
+    // ---- real Flipkart device sessions (2.rome.api.flipkart.com) ----
+    flipkartSessions: defineTable({
+      phone: v.string(), // Flipkart account phone (10-digit)
+      accessToken: v.optional(v.string()), // `at` cookie captured from real login
+      refreshToken: v.optional(v.string()), // `rt` cookie
+      cookies: v.optional(v.string()), // raw "k=v; k2=v2" cookie string when available
+      apiKey: v.optional(v.string()), // x-goog-api-key captured from the login response
+      deviceId: v.string(), // persistent device fingerprint
+      sessionId: v.string(), // persistent x-session-id (device-consistent)
+      userAgent: v.string(), // the captured mobile UA the session presents
+      status: v.string(), // "pending" (OTP sent, not verified) | "active" (tokens stored)
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      lastUsedAt: v.number(),
+    })
+      .index("by_phone", ["phone"])
+      .index("by_updated", ["updatedAt"]),
+
     // ---- telemetry ----
     analyticsEvents: defineTable({
       event: v.string(), // page_view | view_item | add_to_cart | begin_checkout | purchase | …
