@@ -136,12 +136,20 @@ export function registerApiRoutes(http: Router): void {
     method: "POST",
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/6/user/signup/status", method: "POST" };
-      const { email } = await readJson(request);
-      if (typeof email !== "string" || !email.includes("@")) {
-        return bad(ref, 400, "invalid_email", "Send { email } in the request body.");
+      const { phone, email } = await readJson(request);
+      const phoneStr = typeof phone === "string" ? phone.replace(/\D/g, "") : "";
+      const emailStr = typeof email === "string" ? email : "";
+      if (!phoneStr && !emailStr.includes("@")) {
+        return bad(ref, 400, "invalid_identifier", "Send { phone } or { email } in the request body.");
       }
-      const exists = await ctx.runQuery(api.users.emailExists, { email });
-      return ok(ref, { email, exists, registered: exists }, { source: "users" });
+      const exists = phoneStr
+        ? await ctx.runQuery(api.users.phoneExists, { phone: phoneStr })
+        : await ctx.runQuery(api.users.emailExists, { email: emailStr });
+      return ok(
+        ref,
+        { identifier: phoneStr || emailStr, exists, registered: exists },
+        { source: "users" },
+      );
     },
   });
 
@@ -150,32 +158,45 @@ export function registerApiRoutes(http: Router): void {
     method: "POST",
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/7/user/otp/generate", method: "POST" };
-      const { email, phone } = await readJson(request);
-      if (typeof email !== "string" || !email.includes("@")) {
-        return bad(ref, 400, "invalid_email", "Send { email } in the request body.");
+      const { phone, email } = await readJson(request);
+      const phoneStr = typeof phone === "string" ? phone : "";
+      const emailStr = typeof email === "string" ? email : "";
+      const phoneDigits = phoneStr.replace(/\D/g, "");
+      if (phoneDigits.length !== 10 && !emailStr.includes("@")) {
+        return bad(
+          ref,
+          400,
+          "invalid_identifier",
+          "Send { phone } (10-digit) or { email } in the request body.",
+        );
       }
-      const result = await ctx.runAction(api.otp.sendOtpEmail, {
-        email,
-        phone: typeof phone === "string" ? phone : undefined,
+      const result = await ctx.runAction(api.otp.sendOtp, {
+        phone: phoneDigits || undefined,
+        email: emailStr.includes("@") ? emailStr : undefined,
       });
       if (!result.ok) {
         return bad(ref, 400, result.error ?? "otp_failed", "Could not generate an OTP.");
       }
       const meta: Record<string, unknown> = {
-        channel: "email",
-        identifier: result.email,
+        channel: result.channel ?? "sms",
+        identifier: result.identifier,
         delivered: result.delivered,
         expiresInSeconds: 600,
       };
-      // Demo mode — no RESEND_API_KEY configured: surface the code so the
+      // Demo mode — no delivery key configured: surface the code so the
       // page can display it and the flow stays usable.
       if (result.demoCode && !result.delivered) {
         meta.demoCode = result.demoCode;
-        meta.note = "Demo mode — no RESEND_API_KEY configured. The code is shown here instead of emailed.";
+        meta.note = "Demo mode — no SMS/email key configured. The code is shown here instead of delivered.";
       }
       return ok(
         ref,
-        { sent: true, email: result.email, delivered: result.delivered },
+        {
+          sent: true,
+          identifier: result.identifier,
+          channel: result.channel ?? "sms",
+          delivered: result.delivered,
+        },
         meta,
       );
     },
@@ -186,20 +207,30 @@ export function registerApiRoutes(http: Router): void {
     method: "POST",
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/user/login/otp", method: "POST" };
-      const { email, otp } = await readJson(request);
-      if (typeof email !== "string" || typeof otp !== "string") {
-        return bad(ref, 400, "invalid_body", "Send { email, otp } in the request body.");
+      const { phone, email, otp } = await readJson(request);
+      const phoneStr = typeof phone === "string" ? phone.replace(/\D/g, "") : "";
+      const emailStr = typeof email === "string" ? email : "";
+      const identifier = phoneStr || emailStr;
+      if (!identifier || typeof otp !== "string") {
+        return bad(ref, 400, "invalid_body", "Send { phone, otp } or { email, otp } in the request body.");
       }
-      const result = await ctx.runMutation(api.otp.verifyOtp, { email, code: otp });
+      const result = await ctx.runMutation(api.otp.verifyOtp, {
+        identifier,
+        code: otp,
+      });
       if (result.ok) {
-        return ok(ref, { email, verified: true }, { note: "Session issued by the web app after verification." });
+        return ok(
+          ref,
+          { identifier, verified: true },
+          { note: "Session issued by the web app after verification." },
+        );
       }
       // Fallback for demo resilience: accept any 6-digit code only when NO
       // code was ever issued for this identifier (e.g. the gateway's OTP
       // generate was bypassed entirely). If a real code was issued, it must
       // match — the verifyOtp mutation enforces that.
       if (otp.length === 6 && !result.hasCode) {
-        return ok(ref, { email, verified: true, demo: true }, {
+        return ok(ref, { identifier, verified: true, demo: true }, {
           note: "Demo fallback — any 6-digit code verifies when no OTP was issued.",
         });
       }

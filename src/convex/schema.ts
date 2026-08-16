@@ -42,6 +42,7 @@ const schema = defineSchema(
       email: v.optional(v.string()), // email of the user. do not remove
       emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
+      phone: v.optional(v.string()), // phone number (E.164 digits), set on OTP login
 
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
@@ -173,10 +174,11 @@ const schema = defineSchema(
 
     // ---- otp (email delivery via Resend) ----
     otpCodes: defineTable({
-      email: v.string(), // normalized email the code was sent to
-      phone: v.optional(v.string()), // phone identifier, when provided
+      email: v.string(), // identifier key — normalized email OR phone number
+      phone: v.optional(v.string()), // phone number, when delivered via SMS
       code: v.string(), // 6-digit code (hashed-ish storage is out of scope for demo)
       used: v.boolean(),
+      channel: v.optional(v.string()), // "sms" | "email" — how the code was delivered
       createdAt: v.number(),
     })
       .index("by_email", ["email"])

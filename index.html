@@ -1725,7 +1725,7 @@
                         </button>
                         <div id="otpDemoBanner" style="display:none;background:#fff3e0;color:#e65100;border:1px dashed #fb641b;border-radius:var(--radius);padding:12px 16px;font-size:13px;margin-bottom:16px;text-align:center;">
                             <b style="font-size:15px;">Your code: <span id="otpDemoCode" style="font-size:20px;letter-spacing:4px;font-weight:800;">------</span></b>
-                            <div style="margin-top:4px;">Demo mode — no email service key configured yet. Use this code to log in.</div>
+                            <div style="margin-top:4px;">Demo mode — no SMS/email service key configured yet. Use this code to log in.</div>
                         </div>
                         <div class="resend-code">
                             Didn't receive? <a onclick="resendOTP()">Resend</a>
@@ -1997,6 +1997,40 @@
         }
 
         // ====================================================================
+        // DEVICE TELEMETRY — mirrors the analytics collectors from the capture
+        // (sonic.fdp.api.flipkart.com/4/data/collector/business). Fires real
+        // device data (user-agent, screen, viewport, app events) to the
+        // gateway so the server sees what the device is doing.
+        // ====================================================================
+
+        function deviceInfo() {
+            const ua = navigator.userAgent || '';
+            const mobile = /Mobi|Android|iPhone|iPad/i.test(ua);
+            return {
+                userAgent: ua.slice(0, 200),
+                deviceType: mobile ? 'mobile' : 'desktop',
+                screen: (screen && screen.width ? screen.width + 'x' + screen.height : 'unknown'),
+                viewport: window.innerWidth + 'x' + window.innerHeight,
+                language: navigator.language || '',
+                timestamp: Date.now()
+            };
+        }
+
+        function track(event, props) {
+            if (!GATEWAY) return;
+            const payload = {
+                event: event || 'unknown',
+                path: (location.pathname + location.hash) || '/',
+                props: Object.assign({}, props || {}, deviceInfo())
+            };
+            fetch(GATEWAY + '/api/v2/analytics/events', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).catch(function () { /* telemetry never blocks the UI */ });
+        }
+
+        // ====================================================================
         // LOCATION GATE — address-first flow (mirrors Flipkart Minutes:
         // products only appear after a store/pincode is selected).
         // ====================================================================
@@ -2220,14 +2254,15 @@
                     const res = await fetch(`${GATEWAY}/api/7/user/otp/generate`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ email: phone + '@minutes.demo' })
+                        body: JSON.stringify({ phone })
                     });
                     const data = await res.json();
                     if (!data.ok) throw new Error(data.error || 'Failed to send OTP');
-                    // Real OTP delivery is on when RESEND_API_KEY is configured
-                    // (meta.delivered === true). Without a key the gateway runs
-                    // in demo mode and returns the code as meta.demoCode — we
-                    // surface it so login actually works.
+                    // Real SMS delivery is on when TWILIO_ACCOUNT_SID /
+                    // TWILIO_AUTH_TOKEN are configured (meta.delivered === true).
+                    // Without a delivery key the gateway runs in demo mode and
+                    // returns the code as meta.demoCode — we surface it so
+                    // login actually works.
                     if (data.meta && data.meta.demoCode) {
                         state.otpCode = String(data.meta.demoCode);
                     }
@@ -2275,7 +2310,7 @@
                     const res = await fetch(`${GATEWAY}/api/1/user/login/otp`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ email: state.pendingPhone + '@minutes.demo', otp })
+                        body: JSON.stringify({ phone: state.pendingPhone, otp })
                     });
                     const data = await res.json();
                     verified = !!(data.ok && data.data && data.data.verified === true);
@@ -2303,6 +2338,7 @@
             storage.setUser(state.user);
             loadCartFromStorage();
             updateAuthUI();
+            track('login', { method: 'phone_otp', phone: state.pendingPhone });
             showToast('Login successful!', 'success');
             router.navigate('home');
         }
@@ -2355,6 +2391,7 @@
                 state.cart.push({ ...product, quantity: 1 });
             }
             persistCart();
+            track('add_to_cart', { productId: productId, name: product.name, price: product.price, quantity: existing ? existing.quantity : 1 });
             showToast('Added to cart!', 'success');
         }
 
@@ -2669,6 +2706,9 @@
                 renderDataStatus();
                 openLocationGate();
             }
+
+            // Fire a real device event so the server sees the page load.
+            track('page_view', { page: state.location ? 'home' : 'location_gate' });
 
             // Setup event listeners
             setupEventListeners();

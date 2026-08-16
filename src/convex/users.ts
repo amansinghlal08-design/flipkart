@@ -38,6 +38,26 @@ export const emailExists = query({
 });
 
 /**
+ * Phone-number lookup used by POST /api/6/user/signup/status — mirrors the
+ * signup-status endpoint from the capture. The auth tables don't index phone,
+ * so we scan the users table (small demo population); returns whether an
+ * account with this phone exists.
+ */
+export const phoneExists = query({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const digits = phone.replace(/\D/g, "");
+    if (!digits) return null;
+    const users = await ctx.db.query("users").collect();
+    return users.some(
+      (u) =>
+        typeof u.phone === "string" &&
+        (u.phone === digits || u.phone === `+91${digits}`),
+    );
+  },
+});
+
+/**
  * Use this function internally to get the current user data. Remember to handle the null user case.
  * @param ctx
  * @returns
