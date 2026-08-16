@@ -6,6 +6,7 @@
     <title>Flipkart Minutes - Groceries in Minutes</title>
     <meta name="description" content="Groceries & essentials delivered in minutes">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <style>
         :root {
             --primary: #2874f0;
@@ -1346,6 +1347,163 @@
             min-height: 18px;
         }
 
+        .gate-map-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            margin-top: 14px;
+            padding: 13px 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: left;
+        }
+
+        .gate-map-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 116, 240, 0.35);
+        }
+
+        .gate-map-btn i:first-child {
+            font-size: 20px;
+        }
+
+        .gate-map-btn i:last-child {
+            margin-left: auto;
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        /* Map location picker */
+        #mapOverlay {
+            position: fixed;
+            inset: 0;
+            background: var(--white);
+            z-index: 300;
+            display: none;
+            flex-direction: column;
+        }
+
+        #mapOverlay.open {
+            display: flex;
+            animation: fadeIn 0.25s ease;
+        }
+
+        .map-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            background: var(--white);
+            box-shadow: var(--shadow);
+            position: relative;
+            z-index: 500;
+        }
+
+        .map-back {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: var(--bg);
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--text);
+            flex-shrink: 0;
+            transition: var(--transition);
+        }
+
+        .map-back:hover {
+            background: var(--border);
+        }
+
+        .map-title {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .map-title strong {
+            font-size: 16px;
+        }
+
+        .map-title span {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+
+        #mapEl {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            z-index: 400;
+            background: #e8eaf0;
+        }
+
+        .map-address {
+            padding: 12px 16px;
+            background: var(--white);
+            border-top: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .map-address i {
+            color: var(--primary);
+        }
+
+        .map-actions {
+            display: flex;
+            gap: 10px;
+            padding: 12px 16px 16px;
+            background: var(--white);
+            border-top: 1px solid var(--border);
+        }
+
+        .map-locate {
+            flex-shrink: 0;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            background: var(--white);
+            color: var(--text);
+            border-radius: var(--radius);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .map-locate:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .map-actions .btn-primary {
+            flex: 1;
+            width: auto;
+            padding: 13px 16px;
+        }
+
+        .map-actions .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .map-pin-bounce {
+            animation: pulse 1.2s ease;
+        }
+
         .deliver-to {
             display: flex;
             align-items: center;
@@ -1451,7 +1609,33 @@
                 <input type="tel" id="gatePincode" placeholder="Enter 6-digit pincode" maxlength="6" inputmode="numeric">
                 <button id="gatePincodeBtn" onclick="applyPincode()">Apply</button>
             </div>
+            <button class="gate-map-btn" onclick="openMapPicker()">
+                <i class="fas fa-map-marked-alt"></i>
+                <span>Pick your exact location on the map</span>
+                <i class="fas fa-chevron-right"></i>
+            </button>
             <div class="gate-error" id="gateError"></div>
+        </div>
+    </div>
+
+    <!-- Map location picker (Leaflet + OpenStreetMap) -->
+    <div id="mapOverlay">
+        <div class="map-header">
+            <button class="map-back" onclick="closeMapPicker()"><i class="fas fa-arrow-left"></i></button>
+            <div class="map-title">
+                <strong>Set delivery location</strong>
+                <span>Drag the pin to your exact spot</span>
+            </div>
+        </div>
+        <div id="mapEl"></div>
+        <div class="map-address" id="mapAddress">Finding your location…</div>
+        <div class="map-actions">
+            <button id="mapLocateBtn" class="map-locate" onclick="locateOnMap()">
+                <i class="fas fa-crosshairs"></i> Use my location
+            </button>
+            <button id="mapConfirmBtn" class="btn-primary" onclick="confirmMapLocation()" disabled>
+                <i class="fas fa-check"></i> Confirm delivery location
+            </button>
         </div>
     </div>
 
@@ -1764,6 +1948,7 @@
         <i class="fas fa-arrow-up"></i>
     </button>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // ====================================================================
         // API CONFIG
@@ -1834,11 +2019,11 @@
         // Stores the quick-commerce pickup points; the gate renders them as
         // one-tap options mirroring GET /api/v2/locations/pickup-points.
         const PICKUP_POINTS = [
-            { id: 'pp-1', name: 'Staple Minutes — MG Road', city: 'Bengaluru', pincode: '560001', etaMinutes: 10, open: true },
-            { id: 'pp-2', name: 'Staple Minutes — Indiranagar', city: 'Bengaluru', pincode: '560038', etaMinutes: 14, open: true },
-            { id: 'pp-3', name: 'Staple Kiosk — Connaught Place', city: 'New Delhi', pincode: '110001', etaMinutes: 9, open: true },
-            { id: 'pp-4', name: 'Staple Minutes — Linking Road', city: 'Mumbai', pincode: '400052', etaMinutes: 12, open: true },
-            { id: 'pp-5', name: 'Staple Kiosk — Anna Nagar', city: 'Chennai', pincode: '600040', etaMinutes: 10, open: false }
+            { id: 'pp-1', name: 'Staple Minutes — MG Road', city: 'Bengaluru', pincode: '560001', etaMinutes: 10, open: true, lat: 12.9752, lng: 77.6056 },
+            { id: 'pp-2', name: 'Staple Minutes — Indiranagar', city: 'Bengaluru', pincode: '560038', etaMinutes: 14, open: true, lat: 12.9719, lng: 77.6412 },
+            { id: 'pp-3', name: 'Staple Kiosk — Connaught Place', city: 'New Delhi', pincode: '110001', etaMinutes: 9, open: true, lat: 28.6315, lng: 77.2167 },
+            { id: 'pp-4', name: 'Staple Minutes — Linking Road', city: 'Mumbai', pincode: '400052', etaMinutes: 12, open: true, lat: 19.0596, lng: 72.8295 },
+            { id: 'pp-5', name: 'Staple Kiosk — Anna Nagar', city: 'Chennai', pincode: '600040', etaMinutes: 10, open: false, lat: 13.0878, lng: 80.2102 }
         ];
 
         const VALID_PINCODES = PICKUP_POINTS
@@ -2113,7 +2298,13 @@
             const chip = document.getElementById('deliverToText');
             if (!chip) return;
             if (state.location) {
-                chip.innerHTML = `Deliver to <b>${state.location.pincode}</b> · ${state.location.etaMinutes} min`;
+                if (state.location.source === 'map') {
+                    const label = (state.location.label || state.location.name || 'Pinned location');
+                    const short = label.length > 38 ? label.slice(0, 38) + '…' : label;
+                    chip.innerHTML = `Deliver to <b>${short}</b> · ${state.location.etaMinutes} min`;
+                } else {
+                    chip.innerHTML = `Deliver to <b>${state.location.pincode}</b> · ${state.location.etaMinutes} min`;
+                }
             } else {
                 chip.innerHTML = 'Set location to see products';
             }
@@ -2121,6 +2312,184 @@
 
         // Asks the gateway whether Flipkart session creds are configured, so the
         // banner can show "Flipkart live" vs "mirror". Never blocks the page.
+        // ====================================================================
+        // Map location picker (Leaflet + OpenStreetMap, no API key needed)
+        // ====================================================================
+        let mapPicker = null; // { map, marker, lat, lng, label, pincode }
+
+        function haversineKm(lat1, lng1, lat2, lng2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLng / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function nearestStoreEta(lat, lng) {
+            let best = null, bestDist = Infinity;
+            for (const p of PICKUP_POINTS) {
+                if (!p.open || !p.lat) continue;
+                const dist = haversineKm(lat, lng, p.lat, p.lng);
+                if (dist < bestDist) { bestDist = dist; best = p; }
+            }
+            if (!best) return 15;
+            // Base ETA scales a bit with distance beyond 2 km, like the real apps.
+            const extra = Math.max(0, Math.ceil((bestDist - 2) * 3));
+            return best.etaMinutes + extra;
+        }
+
+        async function reverseGeocode(lat, lng) {
+            try {
+                const res = await fetch(
+                    'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + lat + '&lon=' + lng + '&zoom=17&addressdetails=1',
+                    { headers: { 'Accept-Language': 'en' } }
+                );
+                const data = await res.json();
+                const a = data.address || {};
+                const parts = [a.road || a.suburb || a.neighbourhood || a.hamlet,
+                    a.suburb || a.city_district || a.town || a.village,
+                    a.city || a.state_district || a.state].filter(Boolean);
+                return {
+                    label: parts.join(', ') || data.display_name || 'Pinned location (' + lat.toFixed(5) + ', ' + lng.toFixed(5) + ')',
+                    pincode: a.postcode || ''
+                };
+            } catch (e) {
+                return { label: 'Pinned location (' + lat.toFixed(5) + ', ' + lng.toFixed(5) + ')', pincode: '' };
+            }
+        }
+
+        function initMapPicker(lat, lng) {
+            const el = document.getElementById('mapEl');
+            if (!el || typeof L === 'undefined') {
+                showToast('Map unavailable — use a store or pincode above', 'error');
+                closeMapPicker();
+                return;
+            }
+            if (!mapPicker) {
+                const map = L.map(el, { zoomControl: true });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(map);
+                const marker = L.marker([lat, lng], {
+                    draggable: true,
+                    title: 'Drag to set your delivery location'
+                }).addTo(map);
+                marker.on('dragend', () => {
+                    const p = marker.getLatLng();
+                    onPinMoved(p.lat, p.lng);
+                });
+                map.on('click', (e) => {
+                    marker.setLatLng(e.latlng);
+                    onPinMoved(e.latlng.lat, e.latlng.lng);
+                });
+                // Show our stores on the map so users can aim at the nearest one.
+                PICKUP_POINTS.filter(p => p.open && p.lat).forEach(p => {
+                    L.circleMarker([p.lat, p.lng], {
+                        radius: 8, color: '#fb641b', fillColor: '#fb641b', fillOpacity: 0.9
+                    }).addTo(map).bindTooltip(p.name.split(' — ')[0] + ' · ' + p.etaMinutes + ' min');
+                });
+                mapPicker = { map, marker };
+            }
+            mapPicker.map.setView([lat, lng], 16);
+            mapPicker.marker.setLatLng([lat, lng]);
+            setTimeout(() => mapPicker.map.invalidateSize(), 150);
+            onPinMoved(lat, lng);
+        }
+
+        async function onPinMoved(lat, lng) {
+            if (!mapPicker) return;
+            mapPicker.lat = lat;
+            mapPicker.lng = lng;
+            const addr = document.getElementById('mapAddress');
+            const btn = document.getElementById('mapConfirmBtn');
+            if (addr) addr.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Finding address…';
+            if (btn) btn.disabled = true;
+            const geo = await reverseGeocode(lat, lng);
+            mapPicker.label = geo.label;
+            mapPicker.pincode = geo.pincode || '';
+            const eta = nearestStoreEta(lat, lng);
+            if (addr) addr.innerHTML = '<i class="fas fa-map-pin"></i> ' + geo.label + ' <b>· ~' + eta + ' min</b>';
+            if (btn) btn.disabled = false;
+        }
+
+        function openMapPicker() {
+            const overlay = document.getElementById('mapOverlay');
+            if (!overlay) return;
+            overlay.classList.add('open');
+            let lat = 12.9716, lng = 77.5946; // default: Bengaluru
+            if (state.location && state.location.lat) { lat = state.location.lat; lng = state.location.lng; }
+            initMapPicker(lat, lng);
+            // Prefer the user's real position, like the quick-commerce apps.
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        if (!mapPicker) return;
+                        mapPicker.map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+                        mapPicker.marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
+                        onPinMoved(pos.coords.latitude, pos.coords.longitude);
+                    },
+                    () => { /* permission denied — keep the default pin */ },
+                    { timeout: 6000, maximumAge: 60000 }
+                );
+            }
+        }
+
+        function locateOnMap() {
+            if (!navigator.geolocation || !mapPicker) return;
+            const btn = document.getElementById('mapLocateBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating…'; }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    mapPicker.map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+                    mapPicker.marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
+                    onPinMoved(pos.coords.latitude, pos.coords.longitude);
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-crosshairs"></i> Use my location'; }
+                },
+                () => {
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-crosshairs"></i> Use my location'; }
+                    showToast('Location permission denied — drag the pin instead', 'error');
+                },
+                { timeout: 8000 }
+            );
+        }
+
+        function closeMapPicker() {
+            const overlay = document.getElementById('mapOverlay');
+            if (overlay) overlay.classList.remove('open');
+            if (mapPicker && mapPicker.map) setTimeout(() => mapPicker.map.invalidateSize(), 200);
+        }
+
+        function confirmMapLocation() {
+            if (!mapPicker || mapPicker.lat == null || mapPicker.lng == null) return;
+            const eta = nearestStoreEta(mapPicker.lat, mapPicker.lng);
+            const label = mapPicker.label || 'Pinned location';
+            const loc = {
+                id: 'map_' + Math.round(mapPicker.lat * 10000) + '_' + Math.round(mapPicker.lng * 10000),
+                name: label,
+                label: label,
+                city: label.split(', ').slice(-2).join(', '),
+                pincode: mapPicker.pincode || '',
+                etaMinutes: eta,
+                lat: mapPicker.lat,
+                lng: mapPicker.lng,
+                source: 'map'
+            };
+            closeMapPicker();
+            state.location = loc;
+            storage.setLocation(loc);
+            updateDeliverTo();
+            document.getElementById('locationGate').style.display = 'none';
+            showToast('Delivering to your pinned location · ~' + eta + ' min', 'success');
+            // Products only load after an address is confirmed — like the real app.
+            if (state.allItems.length === 0 && !state.dataSource.loaded) {
+                loadCatalog();
+                checkDataStatus();
+            }
+        }
+
         async function checkDataStatus() {
             if (!GATEWAY) return;
             try {
