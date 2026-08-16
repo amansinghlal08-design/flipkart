@@ -195,6 +195,7 @@ const schema = defineSchema(
       cookies: v.optional(v.string()), // raw "k=v; k2=v2" cookie string when available
       apiKey: v.optional(v.string()), // x-goog-api-key (mobile-app surface only)
       deviceId: v.string(), // persistent device fingerprint (X-Device-Id)
+      deviceProfile: v.optional(v.string()), // JSON of the picked device (brand/model/os/build/app version)
       visitId: v.optional(v.string()), // persistent X-Visit-Id
       dcId: v.optional(v.string()), // last known Rome DC (e.g. "2")
       sessionId: v.string(), // persistent x-session-id (device-consistent)

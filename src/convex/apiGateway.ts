@@ -20,7 +20,7 @@ const SORTS = [
   "price-desc",
   "rating",
   "newest",
-] as const;
+] as const; // sorted options for the catalog endpoint
 
 function requestId(): string {
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -250,25 +250,23 @@ export function registerApiRoutes(http: Router): void {
           } as never)) as {
             ok?: boolean;
             requestId?: string | null;
-            session?: Record<string, string> | null;
+            cookies?: string | null;
             deviceId?: string;
+            deviceProfile?: string;
             visitId?: string;
             dc?: string;
             userAgent?: string;
             status?: number;
           };
           if (fk && fk.ok && fk.requestId) {
-            const guest = fk.session as Record<string, string> | null | undefined;
             await ctx
               .runMutation(api.flipkartProxy.upsertFlipkartSession, {
                 phone: phoneDigits,
                 status: "pending",
                 requestId: fk.requestId as string | undefined,
-                accessToken: guest?.at as string | undefined,
-                sn: guest?.sn as string | undefined,
-                vid: guest?.vid as string | undefined,
-                secureToken: guest?.secureToken as string | undefined,
+                cookies: fk.cookies as string | undefined,
                 deviceId: fk.deviceId as string | undefined,
+                deviceProfile: fk.deviceProfile as string | undefined,
                 visitId: fk.visitId as string | undefined,
                 dcId: fk.dc as string | undefined,
                 userAgent: fk.userAgent as string | undefined,
@@ -391,12 +389,14 @@ export function registerApiRoutes(http: Router): void {
           .catch(() => null)) as {
           requestId?: string;
           deviceId?: string;
+          deviceProfile?: string;
           visitId?: string;
           dcId?: string;
           accessToken?: string;
           sn?: string;
           vid?: string;
           secureToken?: string;
+          cookies?: string;
         } | null;
         if (session) {
           try {
@@ -406,17 +406,21 @@ export function registerApiRoutes(http: Router): void {
               otp,
               requestId: session.requestId,
               deviceId: session.deviceId,
+              deviceProfile: session.deviceProfile,
               visitId: session.visitId,
               dcId: session.dcId,
               sessionAt: session.accessToken,
               sessionSn: session.sn,
               sessionVid: session.vid,
               sessionSecureToken: session.secureToken,
+              sessionCookies: session.cookies,
             } as never)) as {
               ok?: boolean;
               status?: number;
               dc?: string;
               deviceId?: string;
+              deviceProfile?: string;
+              cookies?: string | null;
               visitId?: string;
               session?: {
                 at?: string; sn?: string; vid?: string; secureToken?: string; rt?: string;
@@ -434,7 +438,9 @@ export function registerApiRoutes(http: Router): void {
                   sn: s.sn,
                   vid: s.vid,
                   secureToken: s.secureToken,
+                  cookies: fk.cookies as string | undefined,
                   deviceId: fk.deviceId as string | undefined,
+                  deviceProfile: fk.deviceProfile as string | undefined,
                   visitId: fk.visitId as string | undefined,
                   dcId: fk.dc as string | undefined,
                 })
@@ -514,6 +520,20 @@ export function registerApiRoutes(http: Router): void {
     },
   });
 
+  addRoute(http, {
+    path: "/4/user/state",
+    method: "POST",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/4/user/state", method: "POST" };
+      const body = await readJson(request);
+      // The reference client validates/refreshes its session with a POST
+      // /4/user/state — forward it live when a session exists.
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/4/user/state", body);
+      if (upstream) return upstream;
+      return sessionScoped(ref);
+    },
+  });
+
   // ============ Location ============
   addRoute(http, {
     path: "/api/1/location/serviceability",
@@ -579,6 +599,18 @@ export function registerApiRoutes(http: Router): void {
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/5/cart/add", method: "POST" };
       const body = await readJson(request);
+      // Reference client's working path first: PUT /api/5/cart/browse with
+      // listingId (most reliable), falling back to productId.
+      const fkAdd = (await ctx.runAction(api.flipkartProxy.flipkartCartAdd, {
+        productId: typeof body.productId === "string" ? body.productId : undefined,
+        listingId: typeof body.listingId === "string" ? body.listingId : undefined,
+        quantity: typeof body.quantity === "number" ? body.quantity : 1,
+        pincode: typeof body.pincode === "string" ? body.pincode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined,
+      } as never)) as { configured?: boolean; ok?: boolean; status?: number; data?: unknown };
+      if (fkAdd && fkAdd.configured && fkAdd.ok) {
+        return ok(ref, { added: true, flipkart: fkAdd.data }, { source: "flipkart-live" });
+      }
       const upstream = await tryFlipkart(ctx, ref, "POST", "/api/5/cart/add", body);
       if (upstream) return upstream;
       return sessionScoped(ref);
@@ -591,6 +623,17 @@ export function registerApiRoutes(http: Router): void {
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/5/cart/remove", method: "DELETE" };
       const body = await readJson(request);
+      // Reference client removes by PUT /api/5/cart/browse with quantity 0.
+      const fkRemove = (await ctx.runAction(api.flipkartProxy.flipkartCartAdd, {
+        productId: typeof body.productId === "string" ? body.productId : undefined,
+        listingId: typeof body.listingId === "string" ? body.listingId : undefined,
+        quantity: 0,
+        pincode: typeof body.pincode === "string" ? body.pincode : undefined,
+        phone: typeof body.phone === "string" ? body.phone : undefined,
+      } as never)) as { configured?: boolean; ok?: boolean; status?: number; data?: unknown };
+      if (fkRemove && fkRemove.configured && fkRemove.ok) {
+        return ok(ref, { removed: true, flipkart: fkRemove.data }, { source: "flipkart-live" });
+      }
       const upstream = await tryFlipkart(ctx, ref, "DELETE", "/api/5/cart/remove", body);
       if (upstream) return upstream;
       return sessionScoped(ref);
@@ -920,14 +963,26 @@ export function registerApiRoutes(http: Router): void {
         ? (rawSort as (typeof SORTS)[number])
         : undefined;
 
-      // Live Flipkart search first (when session creds are configured).
-      const upstream = await tryFlipkart(
-        ctx,
-        ref,
-        "GET",
-        `/api/v2/search?q=${encodeURIComponent(q ?? "")}${category ? `&category=${encodeURIComponent(category)}` : ""}`,
-      );
-      if (upstream) return upstream;
+      // Live Flipkart search first (when session creds are configured) via
+      // the reference client's working path: POST /4/page/fetch.
+      const fkSearch = (await ctx.runAction(api.flipkartProxy.flipkartSearch, {
+        query: q ?? "",
+        pincode: undefined,
+        phone: undefined,
+      } as never)) as { configured?: boolean; ok?: boolean; status?: number; products?: unknown[] };
+      if (fkSearch && fkSearch.configured && fkSearch.ok) {
+        const items = Array.isArray(fkSearch.products) ? fkSearch.products : [];
+        if (items.length > 0) {
+          return ok(ref, items, {
+            count: items.length,
+            query: q ?? null,
+            category: category ?? null,
+            sort: sort ?? "featured",
+            source: "flipkart-live",
+            upstreamStatus: fkSearch.status,
+          });
+        }
+      }
 
       const products = await ctx.runQuery(api.products.listProducts, {
         q,
@@ -1015,12 +1070,38 @@ export function registerApiRoutes(http: Router): void {
       const segs = pathSegments(request); // [api,1,product,id,tail?]
       const productId = segs[3];
       const tail = segs[4];
-      if (productId) {
+      if (productId && !tail) {
+        // Live product details via the reference client's working path:
+        // POST /4/page/fetch with the product pageUri.
+        const fkProduct = (await ctx.runAction(api.flipkartProxy.flipkartProduct, {
+          productId,
+          pincode: undefined,
+          phone: undefined,
+        } as never)) as { configured?: boolean; ok?: boolean; status?: number; products?: unknown[] };
+        if (fkProduct && fkProduct.configured && fkProduct.ok) {
+          const items = Array.isArray(fkProduct.products) ? fkProduct.products : [];
+          if (items.length > 0) {
+            return ok(
+              { endpoint: "/api/1/product/{id}", method: "GET" },
+              items[0],
+              { source: "flipkart-live", upstreamStatus: fkProduct.status },
+            );
+          }
+        }
         const upstream = await tryFlipkart(
           ctx,
-          { endpoint: `/api/1/product/{id}${tail ? `/${tail}` : ""}`, method: "GET" },
+          { endpoint: "/api/1/product/{id}", method: "GET" },
           "GET",
-          `/api/1/product/${productId}${tail ? `/${tail}` : ""}`,
+          `/api/1/product/${productId}`,
+        );
+        if (upstream) return upstream;
+      }
+      if (productId && tail) {
+        const upstream = await tryFlipkart(
+          ctx,
+          { endpoint: `/api/1/product/{id}/${tail}`, method: "GET" },
+          "GET",
+          `/api/1/product/${productId}/${tail}`,
         );
         if (upstream) return upstream;
       }
