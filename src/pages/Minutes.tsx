@@ -10,12 +10,21 @@ import {
   Minus,
   Plus,
   ShoppingBag,
+  Trash2,
   Zap,
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { api as apiClient, useApiResource, type PickupPoint } from "@/lib/apiClient";
 import { inr, unitLabel } from "@/lib/format";
@@ -23,6 +32,9 @@ import { trackEvent } from "@/lib/telemetry";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type { Doc } from "@/convex/_generated/dataModel";
+
+const MINUTES_FREE_DELIVERY_THRESHOLD = 99;
+const MINUTES_DELIVERY_FEE = 20;
 
 const CHIPS = [
   { slug: "all", label: "All" },
@@ -181,16 +193,267 @@ function PickupRow({ point }: { point: PickupPoint }) {
   );
 }
 
+type CartEntry = { item: Doc<"cartItems">; product: Doc<"products"> };
+
+/**
+ * The signature quick-commerce pattern: a sticky bar floats above the bottom
+ * edge as soon as the cart has items, showing the running count + total.
+ * Tapping it slides the mini-cart up from the bottom.
+ */
+function MinutesCartBar({
+  count,
+  total,
+  onOpen,
+}: {
+  count: number;
+  total: number;
+  onOpen: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+4.25rem)] z-30 px-4 md:bottom-6">
+      <div className="mx-auto max-w-md">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex w-full items-center justify-between gap-3 rounded-full bg-neutral-900 py-2.5 pl-3 pr-2 text-white shadow-2xl shadow-neutral-900/30 transition-transform hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/15">
+              <ShoppingBag className="h-4 w-4" />
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-white px-1 text-[10px] font-bold leading-none text-neutral-900">
+                {count > 99 ? "99+" : count}
+              </span>
+            </span>
+            <span className="min-w-0 text-left">
+              <span className="block truncate text-[13px] font-semibold leading-tight">
+                {count} item{count === 1 ? "" : "s"} · {inr(total)}
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-tight text-neutral-400">
+                Delivery in ~10 min
+              </span>
+            </span>
+          </span>
+          <span className="shrink-0 rounded-full bg-white px-5 py-2.5 text-[13px] font-semibold text-neutral-900">
+            View cart
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MiniCartSheet({
+  open,
+  onOpenChange,
+  entries,
+  onIncrement,
+  onDecrement,
+  onRemove,
+  onCheckout,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entries: CartEntry[];
+  onIncrement: (product: Doc<"products">) => void;
+  onDecrement: (product: Doc<"products">) => void;
+  onRemove: (itemId: string) => void;
+  onCheckout: () => void;
+}) {
+  const count = entries.reduce((sum, entry) => sum + entry.item.quantity, 0);
+  const itemTotal = entries.reduce(
+    (sum, entry) => sum + entry.product.price * entry.item.quantity,
+    0,
+  );
+  const discount = entries.reduce(
+    (sum, entry) => sum + (entry.product.mrp - entry.product.price) * entry.item.quantity,
+    0,
+  );
+  const deliveryFee =
+    itemTotal >= MINUTES_FREE_DELIVERY_THRESHOLD ? 0 : MINUTES_DELIVERY_FEE;
+  const grandTotal = itemTotal + deliveryFee;
+  const remaining = Math.max(0, MINUTES_FREE_DELIVERY_THRESHOLD - itemTotal);
+  const progress = Math.min(100, (itemTotal / MINUTES_FREE_DELIVERY_THRESHOLD) * 100);
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="mx-auto max-w-md rounded-t-3xl border-neutral-200 px-0 pb-0"
+      >
+        <SheetHeader className="border-b border-neutral-100 px-5 pb-4">
+          <SheetTitle className="text-base text-neutral-900">
+            Your cart · {count} item{count === 1 ? "" : "s"}
+          </SheetTitle>
+          <SheetDescription className="flex items-center gap-1.5 text-[13px]">
+            <Zap className="h-3.5 w-3.5 text-neutral-400" />
+            Delivering in ~10 min — no minimum order
+          </SheetDescription>
+        </SheetHeader>
+
+        {entries.length === 0 ? (
+          <div className="flex flex-col items-center px-5 py-10 text-center">
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-neutral-100">
+              <ShoppingBag className="h-5 w-5 text-neutral-400" />
+            </span>
+            <p className="mt-4 text-sm font-medium text-neutral-900">Your cart is empty</p>
+            <p className="mt-1 text-[13px] text-neutral-500">
+              Add a few essentials and they'll show up here.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Free-delivery progress */}
+            <div className="px-5 pt-4">
+              {remaining > 0 ? (
+                <p className="text-[12px] text-neutral-600">
+                  Add <span className="font-semibold text-neutral-900">{inr(remaining)}</span>{" "}
+                  more for free delivery
+                </p>
+              ) : (
+                <p className="text-[12px] font-medium text-neutral-900">
+                  Free delivery unlocked 🎉
+                </p>
+              )}
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-neutral-100">
+                <div
+                  className="h-full rounded-full bg-neutral-900 transition-all duration-500"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Items */}
+            <ul className="max-h-[38vh] flex-1 space-y-1 overflow-y-auto px-3 py-3">
+              {entries.map(({ item, product }) => (
+                <li
+                  key={item._id}
+                  className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-neutral-50"
+                >
+                  <span className="shrink-0 overflow-hidden rounded-lg bg-neutral-100">
+                    <ProductVisual
+                      category={product.category}
+                      className="h-14 w-14"
+                      iconClassName="h-6 w-6"
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium leading-5 text-neutral-900">
+                      {product.name.replace(/ — .*$/, "")}
+                    </span>
+                    <span className="mt-0.5 block text-[12px] text-neutral-500">
+                      {unitLabel(product.name, product.unit) ?? product.brand}
+                    </span>
+                    <span className="mt-0.5 block text-[13px] font-semibold tabular-nums text-neutral-900">
+                      {inr(product.price)}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={`Decrease ${product.name} quantity`}
+                      onClick={() => onDecrement(product)}
+                      className="grid h-8 w-8 place-items-center rounded-full border border-neutral-300 text-neutral-700 transition-colors hover:bg-neutral-100"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="w-6 text-center text-[13px] font-semibold tabular-nums text-neutral-900">
+                      {item.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Increase ${product.name} quantity`}
+                      onClick={() => onIncrement(product)}
+                      className="grid h-8 w-8 place-items-center rounded-full border border-neutral-900 text-neutral-900 transition-colors hover:bg-neutral-900 hover:text-white"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${product.name}`}
+                      onClick={() => onRemove(item._id)}
+                      className="ml-1 grid h-8 w-8 place-items-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {/* Totals + checkout */}
+            <SheetFooter className="border-t border-neutral-100 bg-white px-5 pb-5 pt-4">
+              <dl className="w-full space-y-1.5 text-[13px]">
+                <div className="flex justify-between text-neutral-600">
+                  <dt>Item total</dt>
+                  <dd className="tabular-nums">{inr(itemTotal)}</dd>
+                </div>
+                <div className="flex justify-between text-neutral-600">
+                  <dt>Discount</dt>
+                  <dd className="tabular-nums">−{inr(discount)}</dd>
+                </div>
+                <div className="flex justify-between text-neutral-600">
+                  <dt>Delivery</dt>
+                  <dd className="tabular-nums">
+                    {deliveryFee === 0 ? (
+                      <span className="text-neutral-900">Free</span>
+                    ) : (
+                      inr(deliveryFee)
+                    )}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between border-t border-neutral-100 pt-2 text-[15px] font-semibold text-neutral-900">
+                  <dt>Total</dt>
+                  <dd className="tabular-nums">{inr(grandTotal)}</dd>
+                </div>
+              </dl>
+              <Button
+                type="button"
+                className="h-12 w-full rounded-full"
+                onClick={onCheckout}
+              >
+                <Zap className="h-4 w-4" />
+                Checkout in ~10 min · {inr(grandTotal)}
+              </Button>
+            </SheetFooter>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 export default function Minutes() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [chip, setChip] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [cartOpen, setCartOpen] = useState(false);
 
   const addToCart = useMutation(api.cart.addToCart);
   const updateCartItem = useMutation(api.cart.updateCartItem);
   const removeFromCart = useMutation(api.cart.removeFromCart);
   const cart = useQuery(api.cart.getCart);
+
+  const cartEntries: CartEntry[] = cart ?? [];
+  const cartCount = cartEntries.reduce((sum, entry) => sum + entry.item.quantity, 0);
+  const cartTotal = cartEntries.reduce(
+    (sum, entry) => sum + entry.product.price * entry.item.quantity,
+    0,
+  );
+
+  const goToCheckout = () => {
+    setCartOpen(false);
+    navigate(isAuthenticated ? "/checkout" : "/auth?returnTo=/checkout");
+  };
+
+  const handleRemove = async (itemId: string) => {
+    try {
+      await removeFromCart({ itemId: itemId as never });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove item.");
+    }
+  };
 
   const catalog = useApiResource(
     useCallback(() => apiClient.minutesCatalog(), []),
@@ -308,6 +571,13 @@ export default function Minutes() {
                 <Zap className="h-3.5 w-3.5" />
                 Staple Minutes · marketplace=HYPERLOCAL
               </p>
+              <span className="mt-4 inline-flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-800/60 px-3 py-1.5 text-[12px] font-medium text-neutral-300">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                </span>
+                Stores live now · delivering in ~10 min
+              </span>
               <h1 className="mt-5 text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-5xl">
                 Out of everything,
                 <br />
@@ -536,6 +806,22 @@ export default function Minutes() {
           </p>
         </div>
       </section>
+
+      {/* Floating cart + slide-up mini-cart */}
+      <MinutesCartBar
+        count={cartCount}
+        total={cartTotal}
+        onOpen={() => setCartOpen(true)}
+      />
+      <MiniCartSheet
+        open={cartOpen}
+        onOpenChange={setCartOpen}
+        entries={cartEntries}
+        onIncrement={(product) => handleIncrement(product)}
+        onDecrement={(product) => handleDecrement(product)}
+        onRemove={(itemId) => handleRemove(itemId)}
+        onCheckout={goToCheckout}
+      />
     </div>
   );
 }
