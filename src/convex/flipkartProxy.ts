@@ -595,13 +595,21 @@ function b64urlDecode(s: string): string {
   return out;
 }
 
-/** Decode the `exp` (epoch seconds) from a Flipkart `at` JWT, if present. */
-function accessTokenExpiry(at: string): number | null {
+/**
+ * Decode the `exp` (epoch seconds) from a Flipkart JWT (`at` or `rt`), if
+ * present. The payload is read byte-preserving (latin1) and the claim is
+ * regex-extracted, because real Flipkart tokens carry a binary `eAId` claim
+ * inside the JSON text, which makes JSON.parse throw on valid tokens.
+ */
+function accessTokenExpiry(token: string): number | null {
   try {
-    const parts = at.split(".");
+    const parts = token.split(".");
     if (parts.length < 2) return null;
-    const payload = JSON.parse(b64urlDecode(parts[1])) as { exp?: number };
-    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+    const text = b64urlDecode(parts[1]);
+    const m = /"exp"\s*:\s*(\d+)/.exec(text);
+    if (!m) return null;
+    const exp = Number(m[1]);
+    return Number.isFinite(exp) ? exp * 1000 : null;
   } catch {
     return null;
   }
