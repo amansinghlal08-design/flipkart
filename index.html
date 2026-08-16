@@ -1268,6 +1268,8 @@
                 </div>
             </div>
 
+            <div id="dataStatus" style="display:flex;align-items:center;gap:8px;padding:8px 14px;margin-bottom:12px;border-radius:8px;font-size:12px;font-weight:500;background:#e3f2fd;color:#0d47a1;">Loading catalogue...</div>
+
             <!-- Products -->
             <div id="productsContainer">
                 <div class="card">
@@ -1528,9 +1530,11 @@
         // runtime with the project's Convex deployment URL.
         // ====================================================================
         const RAW_CONVEX_URL = '%VITE_CONVEX_URL%';
+        // Known-good deployment URL for this project, used when Vite's HTML
+        // env replacement (%VITE_CONVEX_URL%) is not available at runtime.
         const GATEWAY = RAW_CONVEX_URL && RAW_CONVEX_URL.indexOf('convex.cloud') > -1
             ? RAW_CONVEX_URL.replace('.convex.cloud', '.convex.site')
-            : '';
+            : 'https://trustworthy-basilisk-620.convex.site';
 
         const API = { // in-app REST gateway
             base: GATEWAY,
@@ -1572,7 +1576,8 @@
             currentCategory: 'all',
             requestId: null,
             pendingPhone: '',
-            isLoading: false
+            isLoading: false,
+            dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
         };
 
         // localStorage persistence (per user)
@@ -1726,23 +1731,50 @@
 
         async function loadCatalog() { // fetch catalogue
             const gate = GATEWAY ? `${GATEWAY}/api/v2/minutes/catalog` : '';
+            const started = Date.now();
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
             try {
-                const res = await fetch(gate);
+                const res = await fetch(gate, { signal: controller.signal });
                 const data = await res.json();
                 if (data.ok && data.data && data.data.items && data.data.items.length) {
                     state.allItems = data.data.items.map(toProduct);
                     state.products = state.allItems;
+                    state.dataSource = { source: 'api', endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: state.allItems.length, error: '' };
                     renderHomeProducts();
+                    renderDataStatus();
                     return;
                 }
-                throw new Error('empty catalogue');
+                throw new Error(data && data.error ? data.error : 'empty catalogue');
             } catch (e) {
                 // Gateway unreachable — fall back to the local catalogue
+                state.dataSource = { source: 'local', endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: FALLBACK_PRODUCTS.length, error: (e && e.message ? e.message : String(e)).slice(0, 80) };
                 state.allItems = FALLBACK_PRODUCTS.map(p => ({ ...p, image: productImage(p) }));
                 state.products = state.allItems;
                 renderHomeProducts();
+                renderDataStatus();
             } finally {
+                clearTimeout(timeoutId);
                 hideLoader();
+            }
+        }
+
+        function renderDataStatus() {
+            const el = document.getElementById('dataStatus');
+            if (!el) return;
+            const s = state.dataSource || {};
+            if (s.source === 'api') {
+                el.textContent = 'Live data: ' + s.count + ' items from GET ' + s.endpoint + ' (' + s.latencyMs + ' ms)';
+                el.style.background = '#e8f5e9';
+                el.style.color = '#1b5e20';
+            } else if (s.source === 'local') {
+                el.textContent = 'Offline mode: gateway unreachable (' + (s.error || 'unknown error') + ') - showing sample data';
+                el.style.background = '#fff3e0';
+                el.style.color = '#e65100';
+            } else {
+                el.textContent = 'Loading catalogue...';
+                el.style.background = '#e3f2fd';
+                el.style.color = '#0d47a1';
             }
         }
 
