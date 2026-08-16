@@ -183,10 +183,19 @@ const EGV_LOCATIONS = [
 
 const COUPONS: Record<
   string,
-  { discountPct?: number; freeDelivery?: boolean; note: string }
+  {
+    discountPct?: number;
+    flat?: number;
+    maxDiscount?: number;
+    freeDelivery?: boolean;
+    note: string;
+  }
 > = {
   STAPLE10: { discountPct: 10, note: "10% off your order" },
   FREESHIP: { freeDelivery: true, note: "Free delivery on this order" },
+  MINUTES10: { discountPct: 10, note: "10% off — quick commerce" },
+  FLAT50: { discountPct: 0, flat: 50, note: "Flat ₹50 off" },
+  FIRST20: { discountPct: 20, note: "20% off your first order" },
 };
 
 export function registerApiRoutes(http: Router): void {
@@ -759,7 +768,17 @@ export function registerApiRoutes(http: Router): void {
       const ref = { endpoint: "/api/2/wallet/balance", method: "GET" };
       const upstream = await tryFlipkart(ctx, ref, "GET", "/api/2/wallet/balance");
       if (upstream) return upstream;
-      return sessionScoped(ref);
+      // Mirror fallback — demo wallet so the payment page is usable without
+      // a real Flipkart session.
+      return ok(
+        ref,
+        {
+          balance: 2450,
+          currency: "INR",
+          lastUpdated: Date.now(),
+        },
+        { note: "Demo wallet balance — connect a Flipkart session for live data." },
+      );
     },
   });
 
@@ -770,7 +789,14 @@ export function registerApiRoutes(http: Router): void {
       const ref = { endpoint: "/api/2/wallet/egv/active", method: "GET" };
       const upstream = await tryFlipkart(ctx, ref, "GET", "/api/2/wallet/egv/active");
       if (upstream) return upstream;
-      return sessionScoped(ref);
+      return ok(
+        ref,
+        [
+          { code: "EGV-XXXX-2024", balance: 500, currency: "INR", expiresAt: "2026-12-31" },
+          { code: "EGV-YYYY-2024", balance: 200, currency: "INR", expiresAt: "2027-03-31" },
+        ],
+        { count: 2, note: "Demo gift vouchers — connect a Flipkart session for live data." },
+      );
     },
   });
 
@@ -820,7 +846,15 @@ export function registerApiRoutes(http: Router): void {
       if (upstream) return upstream;
       const coupon = COUPONS[code.trim().toUpperCase()];
       if (!coupon) return ok(ref, { valid: false, code });
-      return ok(ref, { valid: true, code: code.trim().toUpperCase(), ...coupon });
+      return ok(ref, {
+        valid: true,
+        code: code.trim().toUpperCase(),
+        discountPct: coupon.discountPct ?? 0,
+        flat: coupon.flat ?? 0,
+        maxDiscount: coupon.maxDiscount ?? 0,
+        freeDelivery: coupon.freeDelivery ?? false,
+        note: coupon.note,
+      });
     },
   });
 
@@ -1547,7 +1581,15 @@ export function registerV2ApiRoutes(http: Router): void {
       }
       const coupon = COUPONS[code.trim().toUpperCase()];
       if (!coupon) return ok(ref, { valid: false, code });
-      return ok(ref, { valid: true, code: code.trim().toUpperCase(), ...coupon });
+      return ok(ref, {
+        valid: true,
+        code: code.trim().toUpperCase(),
+        discountPct: coupon.discountPct ?? 0,
+        flat: coupon.flat ?? 0,
+        maxDiscount: coupon.maxDiscount ?? 0,
+        freeDelivery: coupon.freeDelivery ?? false,
+        note: coupon.note,
+      });
     },
   });
 

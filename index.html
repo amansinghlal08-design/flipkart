@@ -664,6 +664,121 @@
             transform: none;
         }
 
+        /* Payment page */
+        .pay-methods {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .pay-method {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: var(--transition);
+            background: var(--white);
+        }
+
+        .pay-method:hover {
+            border-color: var(--primary);
+        }
+
+        .pay-method.active {
+            border-color: var(--primary);
+            background: #f0f6ff;
+        }
+
+        .pay-method > i:first-child {
+            width: 42px;
+            height: 42px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            font-size: 18px;
+        }
+
+        .pay-method .pm-body {
+            flex: 1;
+        }
+
+        .pay-method .pm-title {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .pay-method .pm-sub {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 2px;
+        }
+
+        .pay-check {
+            color: var(--success);
+            font-size: 18px;
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .pay-method.active .pay-check {
+            opacity: 1;
+        }
+
+        .pay-detail {
+            display: none;
+            margin-top: 14px;
+            padding: 14px;
+            background: var(--bg);
+            border-radius: var(--radius);
+        }
+
+        .pay-detail.active {
+            display: block;
+        }
+
+        .pay-wallet-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: var(--white);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .pay-wallet-row b {
+            font-size: 15px;
+        }
+
+        .coupon-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .coupon-msg {
+            font-size: 12px;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
+        .coupon-msg.ok {
+            color: var(--success);
+        }
+
+        .coupon-msg.err {
+            color: #c62828;
+        }
+
         /* Empty States */
         .empty-state {
             text-align: center;
@@ -1924,6 +2039,165 @@
             </div>
         </div>
 
+        <!-- Payment Page -->
+        <div class="page" id="paymentPage">
+            <div style="display: grid; grid-template-columns: 1fr 380px; gap: 20px;">
+                <div>
+                    <!-- Delivery address summary -->
+                    <div class="card">
+                        <div class="card-title">
+                            <i class="fas fa-map-marker-alt"></i>
+                            Deliver To
+                        </div>
+                        <div id="payAddress">
+                            <div style="font-size: 13px; color: var(--text-light);">Set your delivery location first</div>
+                        </div>
+                    </div>
+
+                    <!-- Payment methods -->
+                    <div class="card">
+                        <div class="card-title">
+                            <i class="fas fa-credit-card"></i>
+                            Choose Payment Method
+                        </div>
+                        <div class="pay-methods">
+                            <div class="pay-method active" data-method="upi" onclick="selectPayMethod('upi')">
+                                <i class="fas fa-mobile-alt"></i>
+                                <div class="pm-body">
+                                    <div class="pm-title">UPI</div>
+                                    <div class="pm-sub">GPay, PhonePe, Paytm & more</div>
+                                </div>
+                                <i class="fas fa-check-circle pay-check"></i>
+                            </div>
+                            <div class="pay-method" data-method="card" onclick="selectPayMethod('card')">
+                                <i class="fas fa-credit-card"></i>
+                                <div class="pm-body">
+                                    <div class="pm-title">Credit / Debit Card</div>
+                                    <div class="pm-sub">Visa, Mastercard, RuPay, Amex</div>
+                                </div>
+                                <i class="fas fa-check-circle pay-check"></i>
+                            </div>
+                            <div class="pay-method" data-method="wallet" onclick="selectPayMethod('wallet')">
+                                <i class="fas fa-wallet"></i>
+                                <div class="pm-body">
+                                    <div class="pm-title">Flipkart Wallet</div>
+                                    <div class="pm-sub">Use your wallet balance & gift cards</div>
+                                </div>
+                                <i class="fas fa-check-circle pay-check"></i>
+                            </div>
+                            <div class="pay-method" data-method="cod" onclick="selectPayMethod('cod')">
+                                <i class="fas fa-money-bill-wave"></i>
+                                <div class="pm-body">
+                                    <div class="pm-title">Cash on Delivery</div>
+                                    <div class="pm-sub">Pay in cash when your order arrives</div>
+                                </div>
+                                <i class="fas fa-check-circle pay-check"></i>
+                            </div>
+                        </div>
+
+                        <!-- UPI detail -->
+                        <div class="pay-detail active" id="payDetail-upi">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">UPI ID</label>
+                                <input type="text" class="form-input" id="upiId" placeholder="yourname@okhdfcbank">
+                            </div>
+                        </div>
+
+                        <!-- Card detail -->
+                        <div class="pay-detail" id="payDetail-card">
+                            <div class="form-group">
+                                <label class="form-label">Card Number</label>
+                                <input type="text" class="form-input" id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19">
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="form-group">
+                                    <label class="form-label">Expiry</label>
+                                    <input type="text" class="form-input" id="cardExpiry" placeholder="MM/YY" maxlength="5">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">CVV</label>
+                                    <input type="password" class="form-input" id="cardCvv" placeholder="•••" maxlength="4">
+                                </div>
+                            </div>
+                            <div class="pay-wallet-row">
+                                <span>Wallet balance</span>
+                                <b id="walletBalanceCard">₹0</b>
+                            </div>
+                        </div>
+
+                        <!-- Wallet detail -->
+                        <div class="pay-detail" id="payDetail-wallet">
+                            <div class="pay-wallet-row">
+                                <span>Flipkart Wallet balance</span>
+                                <b id="walletBalanceMain">₹0</b>
+                            </div>
+                            <div class="pay-wallet-row">
+                                <span>Gift cards / vouchers</span>
+                                <b id="walletEgyActive">₹0</b>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Apply gift card code</label>
+                                <div class="coupon-row">
+                                    <input type="text" class="form-input" id="egvInput" placeholder="XXXX-XXXX-XXXX">
+                                    <button class="header-btn primary" onclick="applyEgy()">Apply</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- COD detail -->
+                        <div class="pay-detail" id="payDetail-cod">
+                            <div style="font-size: 13px; color: var(--text-light);">
+                                Pay with cash / UPI at your door when the rider arrives.
+                                A small convenience fee may apply.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Coupon -->
+                    <div class="card">
+                        <div class="card-title">
+                            <i class="fas fa-ticket-alt"></i>
+                            Coupon Code
+                        </div>
+                        <div class="coupon-row">
+                            <input type="text" class="form-input" id="couponInput" placeholder="Try MINUTES10 or FLAT50">
+                            <button class="header-btn primary" onclick="applyCoupon()">Apply</button>
+                        </div>
+                        <div class="coupon-msg" id="couponMsg"></div>
+                    </div>
+                </div>
+
+                <div class="cart-summary" id="paymentSummary" style="display: none;">
+                    <div class="card">
+                        <div class="card-title">Price Details</div>
+                        <div class="summary-row">
+                            <span>Price (<span id="payItems">0</span> items)</span>
+                            <span id="payPrice">₹0</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Coupon Discount</span>
+                            <span style="color: var(--success);" id="payDiscount">-₹0</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Delivery Charges</span>
+                            <span style="color: var(--success);">FREE</span>
+                        </div>
+                        <div class="summary-row total">
+                            <span>Total Amount</span>
+                            <span id="payTotal">₹0</span>
+                        </div>
+                        <button class="checkout-btn" onclick="payNow()">
+                            <span id="payNowLabel">Pay ₹0</span>
+                            <i class="fas fa-lock"></i>
+                        </button>
+                        <div style="text-align: center; font-size: 11px; color: var(--text-light); margin-top: 10px;">
+                            <i class="fas fa-shield-alt"></i> 100% secure payments
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Orders Page -->
         <div class="page" id="ordersPage">
             <div class="card">
@@ -2145,6 +2419,7 @@
             flipkartPending: false,
             flipkartOtpError: null,
             flipkartLive: false,
+            walletBalance: 0,
             isLoading: false,
             dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
         };
@@ -2210,6 +2485,7 @@
 
                 // Page specific logic
                 if (page === 'cart') loadCart();
+                if (page === 'payment') loadPayment();
                 if (page === 'orders') loadOrders();
                 if (page === 'profile') loadProfile();
 
@@ -3209,25 +3485,252 @@
                 showToast('Your cart is empty', 'error');
                 return;
             }
+            router.navigate('payment');
+        }
 
-            const total = state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        // ====================================================================
+        // PAYMENT — wallet/balance & payment/initiate on the gateway (live
+        // Flipkart first, mirror fallback), then local order placement.
+        // ====================================================================
+
+        let payMethod = 'upi';
+        let appliedCoupon = null; // { code, discountPct, maxDiscount }
+
+        function payTotals() {
+            const raw = state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            let discount = 0;
+            if (appliedCoupon && appliedCoupon.discountPct) {
+                discount = Math.min(
+                    Math.round((raw * appliedCoupon.discountPct) / 100),
+                    appliedCoupon.maxDiscount || raw
+                );
+            }
+            return { raw, discount, total: raw - discount };
+        }
+
+        function renderPaySummary() {
+            const t = payTotals();
+            const count = state.cart.reduce((s, i) => s + i.quantity, 0);
+            document.getElementById('payItems').textContent = count;
+            document.getElementById('payPrice').textContent = '₹' + t.raw;
+            document.getElementById('payDiscount').textContent = '-₹' + t.discount;
+            document.getElementById('payTotal').textContent = '₹' + t.total;
+            document.getElementById('payNowLabel').textContent = 'Pay ₹' + t.total;
+            document.getElementById('paymentSummary').style.display = 'block';
+        }
+
+        function loadPayment() {
+            if (!state.user) {
+                showToast('Please login first', 'error');
+                router.navigate('login');
+                return;
+            }
+            state.cart = storage.getCart() || [];
+            appliedCoupon = null;
+            document.getElementById('couponMsg').textContent = '';
+            document.getElementById('couponMsg').className = 'coupon-msg';
+            renderPaySummary();
+
+            // Delivery address (from the location gate if set).
+            const addr = document.getElementById('payAddress');
+            const loc = state.location || storage.getLocation && storage.getLocation();
+            if (loc && loc.label) {
+                addr.innerHTML = '<div style="font-weight: 600; font-size: 14px;">' + loc.label +
+                    '</div><div style="font-size: 13px; color: var(--text-light); margin-top: 4px;">' +
+                    (loc.pincode ? 'PIN ' + loc.pincode + ' · ' : '') + '~' + loc.etaMinutes + ' min delivery</div>';
+            } else {
+                addr.innerHTML = '<div style="font-size: 13px; color: var(--text-light);">' +
+                    'Delivery location not set — estimated 10 min delivery</div>';
+            }
+
+            loadWalletBalance();
+        }
+
+        function selectPayMethod(m) {
+            payMethod = m;
+            document.querySelectorAll('.pay-method').forEach(el => {
+                el.classList.toggle('active', el.dataset.method === m);
+            });
+            document.querySelectorAll('.pay-detail').forEach(el => {
+                el.classList.toggle('active', el.id === 'payDetail-' + m);
+            });
+        }
+
+        async function loadWalletBalance() {
+            if (!GATEWAY) return;
+            try {
+                const res = await fetch(`${GATEWAY}/api/2/wallet/balance`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                const data = await res.json();
+                let bal = 0;
+                if (data.ok && data.data && typeof data.data.balance === 'number') {
+                    bal = data.data.balance;
+                } else if (data.data && data.data.totalBalance !== undefined) {
+                    bal = Number(data.data.totalBalance) || 0;
+                }
+                state.walletBalance = bal;
+                document.getElementById('walletBalanceMain').textContent = '₹' + bal;
+                document.getElementById('walletBalanceCard').textContent = '₹' + bal;
+            } catch (e) {
+                document.getElementById('walletBalanceMain').textContent = '₹0';
+                document.getElementById('walletBalanceCard').textContent = '₹0';
+            }
+            // Active gift vouchers (mirror or live).
+            try {
+                const egvRes = await fetch(`${GATEWAY}/api/2/wallet/egv/active`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                const egvData = await egvRes.json();
+                let egvTotal = 0;
+                const egvList = Array.isArray(egvData.data) ? egvData.data : [];
+                egvList.forEach(v => { egvTotal += Number(v.balance) || 0; });
+                if (egvList.length > 0) {
+                    document.getElementById('walletEgyActive').textContent = '₹' + egvTotal + ' (' + egvList.length + ' vouchers)';
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        async function applyEgy() {
+            const code = document.getElementById('egvInput').value.trim();
+            if (!code) { showToast('Enter a gift card code', 'error'); return; }
+            showToast('Gift card ' + code + ' applied (demo)', 'success');
+            const bal = Number(state.walletBalance || 0);
+            document.getElementById('walletEgyActive').textContent = '₹' + (bal + 200);
+        }
+
+        async function applyCoupon() {
+            const input = document.getElementById('couponInput');
+            const code = input.value.trim().toUpperCase();
+            const msg = document.getElementById('couponMsg');
+            if (!code) { showToast('Enter a coupon code', 'error'); return; }
+            try {
+                let coupon = null;
+                if (GATEWAY) {
+                    const res = await fetch(`${GATEWAY}/api/1/coupon/validate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.ok && data.data && data.data.valid) {
+                        coupon = data.data;
+                    }
+                }
+                // Mirror coupons (gateway may also return them via /api/1/offers)
+                if (!coupon) {
+                    const mirror = {
+                        'MINUTES10': { discountPct: 10, maxDiscount: 100 },
+                        'FLAT50': { discountPct: 0, flat: 50 },
+                        'FIRST20': { discountPct: 20, maxDiscount: 150 }
+                    }[code];
+                    if (mirror) {
+                        coupon = {
+                            valid: true,
+                            code,
+                            discountPct: mirror.discountPct,
+                            flat: mirror.flat || 0,
+                            maxDiscount: mirror.maxDiscount || 0
+                        };
+                    }
+                }
+                if (coupon) {
+                    appliedCoupon = {
+                        code,
+                        discountPct: coupon.discountPct || 0,
+                        flat: coupon.flat || 0,
+                        maxDiscount: coupon.maxDiscount || 0
+                    };
+                    msg.textContent = 'Coupon ' + code + ' applied!';
+                    msg.className = 'coupon-msg ok';
+                    showToast('Coupon applied: ' + code, 'success');
+                } else {
+                    msg.textContent = 'Invalid coupon code';
+                    msg.className = 'coupon-msg err';
+                }
+            } catch (e) {
+                msg.textContent = 'Could not validate coupon';
+                msg.className = 'coupon-msg err';
+            }
+            renderPaySummary();
+        }
+
+        async function payNow() {
+            if (!state.user) {
+                showToast('Please login first', 'error');
+                router.navigate('login');
+                return;
+            }
+            if (state.cart.length === 0) {
+                showToast('Your cart is empty', 'error');
+                return;
+            }
+            // Validate the selected method's details.
+            if (payMethod === 'upi' && !document.getElementById('upiId').value.trim()) {
+                showToast('Enter your UPI ID', 'error');
+                return;
+            }
+            if (payMethod === 'card') {
+                const cn = document.getElementById('cardNumber').value.replace(/\s/g, '');
+                const ex = document.getElementById('cardExpiry').value;
+                const cvv = document.getElementById('cardCvv').value;
+                if (cn.length < 12 || !/\d{2}\/\d{2}/.test(ex) || cvv.length < 3) {
+                    showToast('Enter valid card details', 'error');
+                    return;
+                }
+            }
+
+            const t = payTotals();
+            const btn = document.getElementById('payNowLabel');
+            btn.textContent = 'Processing...';
+
+            // 1) Try the live payment initiate (proxy-first) — Flipkart when a
+            //    session exists, mirror otherwise.
+            let paymentRef = null;
+            try {
+                if (GATEWAY) {
+                    const res = await fetch(`${GATEWAY}/api/2/payment/initiate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            amount: t.total,
+                            currency: 'INR',
+                            method: payMethod,
+                            orderId: 'FKM' + Math.floor(100000 + Math.random() * 900000)
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.ok && data.data) paymentRef = data.data;
+                }
+            } catch (e) { /* fall through to local placement */ }
+
+            // 2) Place the order locally (the gateway's orders are
+            //    session-scoped; this page owns its own order history).
             const order = {
                 orderId: 'FKM' + Math.floor(100000 + Math.random() * 900000),
-                status: 'processing',
-                total,
+                status: 'confirmed',
+                total: t.total,
                 itemDisplay: state.cart.slice(0, 3).map(i => i.name).join(', ')
                     + (state.cart.length > 3 ? ` +${state.cart.length - 3} more` : ''),
                 deliveryText: 'Arriving in ~10 min',
-                date: 'Today'
+                date: 'Today',
+                paymentMethod: payMethod === 'cod' ? 'COD' : payMethod.toUpperCase(),
+                coupon: appliedCoupon ? appliedCoupon.code : null,
+                paymentRef: paymentRef ? (paymentRef.transactionId || paymentRef.id || '') : null
             };
-
             const orders = storage.getOrders();
             orders.unshift(order);
             storage.setOrders(orders);
 
             state.cart = [];
             persistCart();
-            showToast('Order placed — arriving in ~10 min!', 'success');
+            btn.textContent = 'Pay ₹' + t.total;
+            track('purchase', {
+                value: t.total,
+                method: payMethod,
+                flipkartSession: !!state.flipkartPending
+            });
+            showToast('Payment successful — order confirmed!', 'success');
             router.navigate('orders');
         }
 
