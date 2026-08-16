@@ -187,13 +187,19 @@ const schema = defineSchema(
     // ---- real Flipkart device sessions (2.rome.api.flipkart.com) ----
     flipkartSessions: defineTable({
       phone: v.string(), // Flipkart account phone (10-digit)
-      accessToken: v.optional(v.string()), // `at` cookie captured from real login
-      refreshToken: v.optional(v.string()), // `rt` cookie
+      accessToken: v.optional(v.string()), // `at` session token from real login
+      refreshToken: v.optional(v.string()), // `rt` refresh token
+      sn: v.optional(v.string()), // `sn` session token
+      vid: v.optional(v.string()), // `vid` session token
+      secureToken: v.optional(v.string()), // `secureToken` session token
       cookies: v.optional(v.string()), // raw "k=v; k2=v2" cookie string when available
-      apiKey: v.optional(v.string()), // x-goog-api-key captured from the login response
-      deviceId: v.string(), // persistent device fingerprint
+      apiKey: v.optional(v.string()), // x-goog-api-key (mobile-app surface only)
+      deviceId: v.string(), // persistent device fingerprint (X-Device-Id)
+      visitId: v.optional(v.string()), // persistent X-Visit-Id
+      dcId: v.optional(v.string()), // last known Rome DC (e.g. "2")
       sessionId: v.string(), // persistent x-session-id (device-consistent)
-      userAgent: v.string(), // the captured mobile UA the session presents
+      userAgent: v.string(), // the FKUA device UA the session presents
+      requestId: v.optional(v.string()), // pending OTP requestId (between send & verify)
       status: v.string(), // "pending" (OTP sent, not verified) | "active" (tokens stored)
       createdAt: v.number(),
       updatedAt: v.number(),

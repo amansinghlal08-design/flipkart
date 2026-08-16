@@ -3,38 +3,40 @@ import { api } from "./_generated/api";
 import { v } from "convex/values";
 
 /**
- * Server-side proxy to the real Flipkart mobile API (2.rome.api.flipkart.com).
+ * Server-side proxy to the real Flipkart API (2.rome.api.flipkart.com).
  *
- * Browsers cannot call 2.rome.api.flipkart.com directly (CORS + the API
- * requires Flipkart session cookies and x-goog-api-key). So the site calls
- * our gateway and this module forwards requests server-side with a
- * device-consistent header/cookie surface:
+ * Browsers cannot call Flipkart's API directly (CORS + it requires device
+ * headers and session cookies), so the site calls our gateway and this module
+ * forwards requests server-side with a device-consistent surface.
  *
- *   - cookies: at (access JWT), rt (refresh JWT), ULSN, T, SN, ud, vd, S
- *   - headers: x-goog-api-key, x-session-id, x-user-agent
+ * Two credential surfaces are supported:
  *
- * Credentials come from two places, in priority order:
- *   1. A REAL DEVICE SESSION stored in Convex (`flipkartSessions`) — created
- *      automatically when a user logs in with OTP through this app (see the
- *      gateway's /api/7/user/otp/generate + /api/1/user/login/otp handlers).
- *   2. Static env vars set in the Keys tab:
- *        FLIPKART_ACCESS_TOKEN   — value of the `at` cookie
- *        FLIPKART_REFRESH_TOKEN  — value of the `rt` cookie
- *        FLIPKART_X_GOOGLE_API_KEY — x-goog-api-key value
- *        FLIPKART_SESSION_COOKIES — raw "k=v; k2=v2" cookie string
- *        FLIPKART_BASE_URL       — defaults to https://2.rome.api.flipkart.com
+ *  1. REAL DEVICE SESSION (web flow — no API key needed):
+ *     - `POST /1/action/view` with `LOGIN_IDENTITY_VERIFY_SHOPSY2` sends a real
+ *       SMS OTP to any phone number (the flow Flipkart's own web app uses).
+ *     - `POST /1/action/view` with `LOGIN_SHOPSY2` verifies the code and
+ *       returns real session tokens (at / sn / vid / secureToken / rt).
+ *     - Sessions are stored in the `flipkartSessions` table, keyed by phone.
+ *     - Every request presents a consistent FKUA device profile
+ *       (X-Device-Id, X-Visit-Id, FK-TENANT-ID: SHOPSY, business: reseller).
+ *     - Rome DC routing: a 406 `ERROR_CODE 2000` response names the datacenter
+ *       to retry on (e.g. 2.rome → 1.rome); we follow it (max 3 hops).
+ *
+ *  2. STATIC ENV CREDS (captured mobile-app surface):
+ *       FLIPKART_ACCESS_TOKEN, FLIPKART_REFRESH_TOKEN,
+ *       FLIPKART_X_GOOGLE_API_KEY, FLIPKART_SESSION_COOKIES,
+ *       FLIPKART_BASE_URL (defaults to https://2.rome.api.flipkart.com)
  *
  * When nothing is configured the actions return { configured: false } so
- * callers fall back to the in-app mirror. The proxy is intended for your own
- * Flipkart account/session only.
+ * callers fall back to the in-app mirror.
  */
 
-const DEFAULT_BASE = "https://2.rome.api.flipkart.com";
+const DEFAULT_DC = "2";
+const NEWRELIC_ID = "VwEHU1dSCxABUVlaAHU1UA";
 
-// The captured device surface the session presents — persistent so Flipkart
-// sees one consistent device across generate → verify → data calls.
-export const DEVICE_USER_AGENT =
-  "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36";
+function fkuaUserAgent(deviceId: string): string {
+  return `Mozilla/5.0 (Linux; Android 14; SM-S918B Build/UP1A.231005.007) FKUA/Retail/2291175/Android/Mobile (samsung/SM-S918B/${deviceId})`;
+}
 
 function newSessionId(): string {
   return `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -42,6 +44,51 @@ function newSessionId(): string {
 
 function newDeviceId(): string {
   return `dev_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-6)}`;
+}
+
+function newVisitId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function tCookie(): string {
+  return `TI${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Rome request that follows the DC-change (406 ERROR_CODE 2000) dance. */
+async function romeFetch(
+  startDc: string,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<{ dc: string; status: number; data: unknown }> {
+  let dc = startDc || DEFAULT_DC;
+  for (let hop = 0; hop < 4; hop++) {
+    const url = `https://${dc}.rome.api.flipkart.com${path}`;
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(12000),
+    });
+    const text = await res.text();
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text.slice(0, 2000);
+    }
+    if (res.status === 406 && data && typeof data === "object") {
+      const anyData = data as { ERROR_CODE?: number; META_INFO?: { dcInfo?: { id?: string } } };
+      const newDc = anyData?.META_INFO?.dcInfo?.id;
+      if (anyData?.ERROR_CODE === 2000 && newDc && String(newDc) !== dc) {
+        dc = String(newDc);
+        continue;
+      }
+    }
+    return { dc, status: res.status, data };
+  }
+  return { dc, status: 0, data: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -76,13 +123,19 @@ export const upsertFlipkartSession = mutation({
   args: {
     phone: v.string(),
     status: v.string(), // "pending" | "active"
-    accessToken: v.optional(v.string()),
-    refreshToken: v.optional(v.string()),
+    accessToken: v.optional(v.string()), // at
+    refreshToken: v.optional(v.string()), // rt
+    sn: v.optional(v.string()),
+    vid: v.optional(v.string()),
+    secureToken: v.optional(v.string()),
     cookies: v.optional(v.string()),
     apiKey: v.optional(v.string()),
     deviceId: v.optional(v.string()),
+    visitId: v.optional(v.string()),
+    dcId: v.optional(v.string()),
     sessionId: v.optional(v.string()),
     userAgent: v.optional(v.string()),
+    requestId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -95,11 +148,17 @@ export const upsertFlipkartSession = mutation({
       status: args.status,
       accessToken: args.accessToken,
       refreshToken: args.refreshToken,
+      sn: args.sn,
+      vid: args.vid,
+      secureToken: args.secureToken,
       cookies: args.cookies,
       apiKey: args.apiKey,
       deviceId: args.deviceId ?? existing?.deviceId ?? newDeviceId(),
+      visitId: args.visitId ?? existing?.visitId ?? newVisitId(),
+      dcId: args.dcId ?? existing?.dcId ?? DEFAULT_DC,
       sessionId: args.sessionId ?? existing?.sessionId ?? newSessionId(),
-      userAgent: args.userAgent ?? existing?.userAgent ?? DEVICE_USER_AGENT,
+      userAgent: args.userAgent ?? existing?.userAgent ?? fkuaUserAgent(args.deviceId ?? existing?.deviceId ?? newDeviceId()),
+      requestId: args.requestId,
       updatedAt: now,
       lastUsedAt: now,
     };
@@ -130,13 +189,144 @@ export const touchSession = mutation({
 });
 
 // ---------------------------------------------------------------------------
+// Real authentication flow (web surface — no API key required)
+// ---------------------------------------------------------------------------
+
+/**
+ * Real Flipkart auth via POST /1/action/view:
+ *  - step "sendOtp"  → sends a real SMS OTP, returns the requestId
+ *  - step "verifyOtp" → verifies the code, returns the real session tokens
+ * The caller persists the returned device profile + tokens in flipkartSessions.
+ */
+export const flipkartAuth = action({
+  args: {
+    step: v.string(), // "sendOtp" | "verifyOtp"
+    phone: v.string(),
+    otp: v.optional(v.string()),
+    requestId: v.optional(v.string()),
+    deviceId: v.optional(v.string()),
+    visitId: v.optional(v.string()),
+    dcId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const phone = args.phone.replace(/\D/g, "");
+    const deviceId = args.deviceId ?? newDeviceId();
+    const visitId = args.visitId ?? newVisitId();
+    const userAgent = fkuaUserAgent(deviceId);
+    const headers: Record<string, string> = {
+      "content-type": "application/json; charset=UTF-8",
+      "user-agent": userAgent,
+      "x-user-agent": userAgent,
+      "x-device-id": deviceId,
+      "x-visit-id": visitId,
+      "x-platform": "web",
+      "fk-tenant-id": "SHOPSY",
+      business: "reseller",
+      "x-newrelic-id": NEWRELIC_ID,
+      "x-device-width": "1080",
+      "x-device-height": "1920",
+      accept: "*/*",
+      "accept-language": "en-IN,en;q=0.9",
+      origin: "https://www.flipkart.com",
+      referer: "https://www.flipkart.com/",
+      cookie: `T=${tCookie()}`,
+    };
+    let dc = args.dcId ?? DEFAULT_DC;
+
+    if (args.step === "sendOtp") {
+      const body = {
+        actionRequestContext: {
+          type: "LOGIN_IDENTITY_VERIFY_SHOPSY2",
+          loginId: phone,
+          loginIdPrefix: "+91",
+          phoneNumberFormat: "E164",
+          addAppHash: true,
+          loginType: "MOBILE",
+          verificationType: "OTP",
+          sourceContext: "DEFAULT",
+          clientQueryParamMap: null,
+        },
+      };
+      const { dc: newDc, status, data } = await romeFetch(dc, "POST", "/1/action/view", headers, body);
+      dc = newDc;
+      const anyData = data as {
+        RESPONSE?: { actionSuccess?: boolean; actionResponseContext?: { requestId?: string } };
+      } | null;
+      const success = Boolean(anyData?.RESPONSE?.actionSuccess);
+      const requestId = anyData?.RESPONSE?.actionResponseContext?.requestId ?? null;
+      return {
+        ok: status < 400 && success,
+        status,
+        dc,
+        deviceId,
+        visitId,
+        userAgent,
+        requestId,
+        data,
+      };
+    }
+
+    // verifyOtp
+    const body = {
+      actionRequestContext: {
+        type: "LOGIN_SHOPSY2",
+        loginId: phone,
+        loginIdPrefix: "+91",
+        password: null,
+        otp: (args.otp ?? "").trim(),
+        otpRequestId: args.requestId ?? null,
+        remainingAttempts: 5,
+        phoneNumberFormat: "E164",
+        loginType: "MOBILE",
+        verificationType: "OTP",
+        sourceContext: "DEFAULT",
+        churned: false,
+        otpRegex: null,
+        data: null,
+        clientQueryParamMap: null,
+      },
+    };
+    const { dc: newDc, status, data } = await romeFetch(dc, "POST", "/1/action/view", headers, body);
+    dc = newDc;
+    const anyData = data as {
+      SESSION?: {
+        at?: string; sn?: string; vid?: string; secureToken?: string; rt?: string;
+        isLoggedIn?: boolean; accountId?: string; firstName?: string; lastName?: string; email?: string;
+      };
+      RESPONSE?: { actionResponseContext?: { authenticationSuccess?: boolean } };
+    } | null;
+    const S = anyData?.SESSION ?? {};
+    const authSuccess = Boolean(anyData?.RESPONSE?.actionResponseContext?.authenticationSuccess);
+    return {
+      ok: status < 400 && authSuccess,
+      status,
+      dc,
+      deviceId,
+      visitId,
+      userAgent,
+      session: {
+        at: S.at ?? null,
+        sn: S.sn ?? null,
+        vid: S.vid ?? null,
+        secureToken: S.secureToken ?? null,
+        rt: S.rt ?? null,
+        isLoggedIn: Boolean(S.isLoggedIn),
+        accountId: S.accountId ?? null,
+        name: S.firstName ? `${S.firstName} ${S.lastName ?? ""}`.trim() : null,
+        email: S.email ?? null,
+      },
+      data,
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 
 /**
  * Whether a Flipkart session is available — from env creds or a stored real
- * session. Cheap (no network) — lets the UI show "connected to Flipkart"
- * without proxying.
+ * session. Cheap (no network) — lets the UI show "connected to Flipkart".
  */
 export const flipkartStatus = action({
   args: {},
@@ -188,8 +378,23 @@ export const flipkartStatus = action({
 });
 
 // ---------------------------------------------------------------------------
-// Proxy
+// Proxy (data endpoints)
 // ---------------------------------------------------------------------------
+
+type StoredSession = {
+  phone: string;
+  accessToken?: string;
+  refreshToken?: string;
+  sn?: string;
+  vid?: string;
+  secureToken?: string;
+  cookies?: string;
+  apiKey?: string;
+  deviceId: string;
+  visitId?: string;
+  dcId?: string;
+  userAgent: string;
+};
 
 function extractTokens(payload: unknown): { accessToken?: string; refreshToken?: string } {
   const out: { accessToken?: string; refreshToken?: string } = {};
@@ -224,124 +429,115 @@ export const proxyFlipkart = action({
     body: v.optional(v.record(v.string(), v.union(v.string(), v.number(), v.boolean(), v.null()))),
     phone: v.optional(v.string()), // prefer this account's stored real session
   },
-  handler: async (ctx, { method, path, body, phone }) => {
-    const base = (process.env.FLIPKART_BASE_URL ?? DEFAULT_BASE).replace(/\/+$/, "");
+  // Explicit return annotation breaks the module self-reference cycle (this
+  // action queries getSessionByPhone/getLatestActiveSession from this module).
+  handler: async (
+    ctx,
+    { method, path, body, phone },
+  ): Promise<
+    | { configured: false }
+    | {
+        configured: true;
+        status: number;
+        ok: boolean;
+        data?: unknown;
+        error?: string;
+        endpoint: string;
+        method: string;
+        dc?: string;
+        session: { phone?: string } | null;
+      }
+  > => {
     const envAccess = (process.env.FLIPKART_ACCESS_TOKEN ?? "").trim();
     const envRefresh = (process.env.FLIPKART_REFRESH_TOKEN ?? "").trim();
     const envApiKey = (process.env.FLIPKART_X_GOOGLE_API_KEY ?? "").trim();
     const envCookies = (process.env.FLIPKART_SESSION_COOKIES ?? "").trim();
 
-    // Resolve credentials: stored session (phone arg) → env vars → latest
-    // stored active session → none.
+    let sessionPhone: string | undefined;
+    let dc = DEFAULT_DC;
     let cookies: string[] = [];
     let apiKey = envApiKey;
-    let sessionId = newSessionId();
-    let userAgent = DEVICE_USER_AGENT;
-    let sessionPhone: string | undefined;
+    let deviceId: string | undefined;
+    let visitId: string | undefined;
+    let userAgent = fkuaUserAgent("device");
 
-    const fromStored = (row: {
-      phone: string;
-      accessToken?: string;
-      refreshToken?: string;
-      cookies?: string;
-      apiKey?: string;
-      sessionId: string;
-      userAgent: string;
-    }): void => {
-      sessionPhone = row.phone;
-      if (row.cookies) cookies.push(row.cookies);
-      else {
-        if (row.accessToken) cookies.push(`at=${row.accessToken}`);
-        if (row.refreshToken) cookies.push(`rt=${row.refreshToken}`);
-      }
-      if (row.apiKey) apiKey = row.apiKey;
-      sessionId = row.sessionId;
-      userAgent = row.userAgent;
-    };
+    // Resolve credentials: stored session (phone arg) → latest stored active
+    // session → env vars → none.
+    const stored = (phone
+      ? ((await ctx.runQuery(api.flipkartProxy.getSessionByPhone, {
+          phone: phone.replace(/\D/g, ""),
+        })) as StoredSession | null)
+      : null) ?? ((await ctx.runQuery(api.flipkartProxy.getLatestActiveSession, {})) as StoredSession | null);
 
-    if (phone) {
-      const stored = await ctx.runQuery(api.flipkartProxy.getSessionByPhone, {
-        phone: phone.replace(/\D/g, ""),
-      });
-      if (stored) {
-        fromStored(stored);
-        if (sessionPhone) {
-          await ctx
-            .runMutation(api.flipkartProxy.touchSession, { phone: sessionPhone })
-            .catch(() => undefined);
-        }
+    if (stored) {
+      sessionPhone = stored.phone;
+      dc = stored.dcId ?? DEFAULT_DC;
+      deviceId = stored.deviceId;
+      visitId = stored.visitId ?? newVisitId();
+      userAgent = stored.userAgent || fkuaUserAgent(stored.deviceId);
+      if (stored.cookies) {
+        cookies.push(stored.cookies);
+      } else {
+        if (stored.accessToken) cookies.push(`at=${stored.accessToken}`);
+        if (stored.sn) cookies.push(`sn=${stored.sn}`);
+        if (stored.vid) cookies.push(`vid=${stored.vid}`);
+        if (stored.secureToken) cookies.push(`secureToken=${stored.secureToken}`);
+        if (stored.refreshToken) cookies.push(`rt=${stored.refreshToken}`);
       }
+      if (stored.apiKey) apiKey = stored.apiKey;
+      await ctx
+        .runMutation(api.flipkartProxy.touchSession, { phone: sessionPhone })
+        .catch(() => undefined);
     }
 
     if (cookies.length === 0 && envCookies) cookies.push(envCookies);
-    if (cookies.length === 0 && !phone) {
+    if (cookies.length === 0 && !stored) {
       if (envAccess) cookies.push(`at=${envAccess}`);
       if (envRefresh) cookies.push(`rt=${envRefresh}`);
     }
 
-    // No stored session and no env creds → mirror mode.
+    // Nothing available → mirror mode.
     if (cookies.length === 0 && !apiKey) {
       return { configured: false as const };
     }
 
     const headers: Record<string, string> = {
-      accept: "application/json, text/plain, */*",
-      "accept-language": "en-IN,en;q=0.9,hi;q=0.8",
-      "content-type": "application/json",
-      origin: "https://www.flipkart.com",
-      referer: "https://www.flipkart.com/",
+      "content-type": "application/json; charset=UTF-8",
       "user-agent": userAgent,
       "x-user-agent": userAgent,
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-origin",
-      "x-session-id": sessionId,
+      "x-platform": "web",
+      "fk-tenant-id": "SHOPSY",
+      business: "reseller",
+      "x-newrelic-id": NEWRELIC_ID,
+      "x-device-width": "1080",
+      "x-device-height": "1920",
+      accept: "application/json, text/plain, */*",
+      "accept-language": "en-IN,en;q=0.9",
+      origin: "https://www.flipkart.com",
+      referer: "https://www.flipkart.com/",
     };
+    if (deviceId) headers["x-device-id"] = deviceId;
+    if (visitId) headers["x-visit-id"] = visitId;
     if (apiKey) headers["x-goog-api-key"] = apiKey;
     if (cookies.length) headers.cookie = cookies.join("; ");
 
-    const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
     try {
-      const res = await fetch(url, {
+      const { dc: finalDc, status, data } = await romeFetch(
+        dc,
         method,
+        path.startsWith("/") ? path : `/${path}`,
         headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(12000),
-      });
-      const text = await res.text();
-      let data: unknown = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = text.slice(0, 2000);
-      }
-      // Capture session cookies Flipkart sets (real login) for storage.
-      let setCookies: string[] = [];
-      try {
-        setCookies = res.headers.getSetCookie?.() ?? [];
-      } catch {
-        setCookies = [];
-      }
-      const tokenHints = extractTokens(data);
-      const atCookie = setCookies.find((c) => /(^|;\s*)at=/i.test(c));
-      const rtCookie = setCookies.find((c) => /(^|;\s*)rt=/i.test(c));
+        body,
+      );
       return {
         configured: true as const,
-        status: res.status,
-        ok: res.ok,
+        status,
+        ok: status < 400,
         data,
         endpoint: path,
         method,
-        session: {
-          phone: sessionPhone,
-          accessToken:
-            tokenHints.accessToken ??
-            (atCookie ? atCookie.split(";")[0].split("=").slice(1).join("=") : undefined),
-          refreshToken:
-            tokenHints.refreshToken ??
-            (rtCookie ? rtCookie.split(";")[0].split("=").slice(1).join("=") : undefined),
-          cookies: setCookies.length ? setCookies.map((c) => c.split(";")[0]).join("; ") : undefined,
-        },
+        dc: finalDc,
+        session: { phone: sessionPhone },
       };
     } catch (error) {
       return {

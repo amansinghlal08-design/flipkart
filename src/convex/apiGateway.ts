@@ -237,44 +237,47 @@ export function registerApiRoutes(http: Router): void {
         );
       }
 
-      // Real device session flow: when Flipkart creds or a stored session
-      // exist, forward the generate to Flipkart so the REAL SMS is sent, and
-      // open a pending session row so verification captures the real tokens.
-      // Otherwise fall back to our own OTP stack (Twilio SMS or demo code).
-      const flipkartResult = await flipkartRequest(
-        ctx,
-        "POST",
-        "/api/7/user/otp/generate",
-        {
-          phone: phoneDigits || undefined,
-          email: emailStr.includes("@") ? emailStr : undefined,
-        },
-        phoneDigits || undefined,
-      );
-      if (flipkartResult.configured && flipkartResult.ok && flipkartResult.status < 500) {
-        if (phoneDigits) {
-          await ctx
-            .runMutation(api.flipkartProxy.upsertFlipkartSession, {
-              phone: phoneDigits,
-              status: "pending",
-            })
-            .catch(() => undefined);
+      // Real Flipkart SMS flow (web surface — no API key needed): forwards
+      // to POST /1/action/view so Flipkart texts the number, and opens a
+      // pending session row so verification captures the real tokens.
+      // Falls back to our own OTP stack (Twilio SMS or demo code) on error.
+      if (phoneDigits) {
+        try {
+          const fk = await ctx.runAction(api.flipkartProxy.flipkartAuth, {
+            step: "sendOtp",
+            phone: phoneDigits,
+          } as never);
+          if (fk && fk.ok && fk.requestId) {
+            await ctx
+              .runMutation(api.flipkartProxy.upsertFlipkartSession, {
+                phone: phoneDigits,
+                status: "pending",
+                requestId: fk.requestId as string | undefined,
+                deviceId: fk.deviceId as string | undefined,
+                visitId: fk.visitId as string | undefined,
+                dcId: fk.dc as string | undefined,
+                userAgent: fk.userAgent as string | undefined,
+              })
+              .catch(() => undefined);
+            return ok(
+              ref,
+              {
+                sent: true,
+                identifier: phoneDigits,
+                channel: "sms",
+                delivered: true,
+                flipkart: true,
+              },
+              {
+                flipkartSession: "pending",
+                upstreamStatus: fk.status,
+                note: "Flipkart sent the code to your phone — enter it to create a real device session.",
+              },
+            );
+          }
+        } catch (e) {
+          // Flipkart flow failed — fall through to the mirror OTP stack.
         }
-        return ok(
-          ref,
-          {
-            sent: true,
-            identifier: phoneDigits || emailStr,
-            channel: "sms",
-            delivered: true,
-            flipkart: true,
-          },
-          {
-            flipkartSession: "pending",
-            upstreamStatus: flipkartResult.status,
-            note: "Flipkart sent the code to your phone — enter it to create a real device session.",
-          },
-        );
       }
       const result = await ctx.runAction(api.otp.sendOtp, {
         phone: phoneDigits || undefined,
@@ -321,39 +324,67 @@ export function registerApiRoutes(http: Router): void {
         return bad(ref, 400, "invalid_body", "Send { phone, otp } or { email, otp } in the request body.");
       }
 
-      // Real device session: a pending/active Flipkart session exists for
-      // this phone — verify with Flipkart directly. On success it returns
-      // the real session tokens, which we store and use for all live data.
+      // Real device session: a pending Flipkart session exists for this
+      // phone — verify with Flipkart directly via /1/action/view. On success
+      // it returns the real session tokens, which we store and use for all
+      // live data calls.
       if (phoneStr) {
-        const session = await ctx
+        const session = (await ctx
           .runQuery(api.flipkartProxy.getSessionByPhone, { phone: phoneStr })
-          .catch(() => null);
+          .catch(() => null)) as {
+          requestId?: string;
+          deviceId?: string;
+          visitId?: string;
+          dcId?: string;
+        } | null;
         if (session) {
-          const fk = await flipkartRequest(
-            ctx,
-            "POST",
-            "/api/1/user/login/otp",
-            { phone: phoneStr, otp },
-            phoneStr,
-          );
-          if (fk.configured && fk.ok && fk.status < 500) {
-            await ctx
-              .runMutation(api.flipkartProxy.upsertFlipkartSession, {
-                phone: phoneStr,
-                status: "active",
-                accessToken: fk.session?.accessToken,
-                refreshToken: fk.session?.refreshToken,
-                cookies: fk.session?.cookies,
-              })
-              .catch(() => undefined);
-            return ok(
-              ref,
-              { identifier: phoneStr, verified: true, flipkart: true },
-              {
-                flipkartSession: "active",
-                note: "Real Flipkart device session created — live data is now served from 2.rome.api.flipkart.com.",
-              },
-            );
+          try {
+            const fk = await ctx.runAction(api.flipkartProxy.flipkartAuth, {
+              step: "verifyOtp",
+              phone: phoneStr,
+              otp,
+              requestId: session.requestId,
+              deviceId: session.deviceId,
+              visitId: session.visitId,
+              dcId: session.dcId,
+            } as never);
+            const s = fk && (fk.session as {
+              at?: string; sn?: string; vid?: string; secureToken?: string; rt?: string;
+              accountId?: string; name?: string; email?: string;
+            } | undefined);
+            if (fk && fk.ok && s && s.at) {
+              await ctx
+                .runMutation(api.flipkartProxy.upsertFlipkartSession, {
+                  phone: phoneStr,
+                  status: "active",
+                  accessToken: s.at,
+                  refreshToken: s.rt,
+                  sn: s.sn,
+                  vid: s.vid,
+                  secureToken: s.secureToken,
+                  deviceId: fk.deviceId as string | undefined,
+                  visitId: fk.visitId as string | undefined,
+                  dcId: fk.dc as string | undefined,
+                })
+                .catch(() => undefined);
+              return ok(
+                ref,
+                {
+                  identifier: phoneStr,
+                  verified: true,
+                  flipkart: true,
+                  accountId: s.accountId,
+                  name: s.name,
+                  email: s.email,
+                },
+                {
+                  flipkartSession: "active",
+                  note: "Real Flipkart device session created — live data is now served from Flipkart.",
+                },
+              );
+            }
+          } catch (e) {
+            // fall through to hard fail below
           }
           // Flipkart rejected the code (or is unreachable) — hard fail rather
           // than fall through to the any-code demo path.
