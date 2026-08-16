@@ -171,6 +171,17 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_code", ["code"]),
 
+    // ---- otp (email delivery via Resend) ----
+    otpCodes: defineTable({
+      email: v.string(), // normalized email the code was sent to
+      phone: v.optional(v.string()), // phone identifier, when provided
+      code: v.string(), // 6-digit code (hashed-ish storage is out of scope for demo)
+      used: v.boolean(),
+      createdAt: v.number(),
+    })
+      .index("by_email", ["email"])
+      .index("by_created", ["createdAt"]),
+
     // ---- telemetry ----
     analyticsEvents: defineTable({
       event: v.string(), // page_view | view_item | add_to_cart | begin_checkout | purchase | …

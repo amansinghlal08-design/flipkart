@@ -148,30 +148,62 @@ export function registerApiRoutes(http: Router): void {
   addRoute(http, {
     path: "/api/7/user/otp/generate",
     method: "POST",
-    handler: async (_ctx, request) => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/7/user/otp/generate", method: "POST" };
-      const { email } = await readJson(request);
+      const { email, phone } = await readJson(request);
       if (typeof email !== "string" || !email.includes("@")) {
         return bad(ref, 400, "invalid_email", "Send { email } in the request body.");
       }
-      return ok(ref, { sent: true, channel: "email", identifier: email }, {
-        note: "OTP delivery is handled by the built-in email OTP provider — enter your email on /auth.",
+      const result = await ctx.runAction(api.otp.sendOtpEmail, {
+        email,
+        phone: typeof phone === "string" ? phone : undefined,
       });
+      if (!result.ok) {
+        return bad(ref, 400, result.error ?? "otp_failed", "Could not generate an OTP.");
+      }
+      const meta: Record<string, unknown> = {
+        channel: "email",
+        identifier: result.email,
+        delivered: result.delivered,
+        expiresInSeconds: 600,
+      };
+      // Demo mode — no RESEND_API_KEY configured: surface the code so the
+      // page can display it and the flow stays usable.
+      if (result.demoCode && !result.delivered) {
+        meta.demoCode = result.demoCode;
+        meta.note = "Demo mode — no RESEND_API_KEY configured. The code is shown here instead of emailed.";
+      }
+      return ok(
+        ref,
+        { sent: true, email: result.email, delivered: result.delivered },
+        meta,
+      );
     },
   });
 
   addRoute(http, {
     path: "/api/1/user/login/otp",
     method: "POST",
-    handler: async (_ctx, request) => {
+    handler: async (ctx, request) => {
       const ref = { endpoint: "/api/1/user/login/otp", method: "POST" };
       const { email, otp } = await readJson(request);
       if (typeof email !== "string" || typeof otp !== "string") {
         return bad(ref, 400, "invalid_body", "Send { email, otp } in the request body.");
       }
-      return ok(ref, { email, verified: otp.length === 6 }, {
-        note: "Enter the code on /auth — the email OTP provider completes sign-in and returns the session token.",
-      });
+      const result = await ctx.runMutation(api.otp.verifyOtp, { email, code: otp });
+      if (result.ok) {
+        return ok(ref, { email, verified: true }, { note: "Session issued by the web app after verification." });
+      }
+      // Fallback for demo resilience: accept any 6-digit code only when NO
+      // code was ever issued for this identifier (e.g. the gateway's OTP
+      // generate was bypassed entirely). If a real code was issued, it must
+      // match — the verifyOtp mutation enforces that.
+      if (otp.length === 6 && !result.hasCode) {
+        return ok(ref, { email, verified: true, demo: true }, {
+          note: "Demo fallback — any 6-digit code verifies when no OTP was issued.",
+        });
+      }
+      return bad(ref, 400, "invalid_otp", "The code you entered is incorrect or has expired.");
     },
   });
 
@@ -1016,8 +1048,12 @@ export function registerV2ApiRoutes(http: Router): void {
     "vegetables",
     "fruits",
     "dairy",
+    "bakery",
     "beverages",
     "snacks",
+    "frozen",
+    "household",
+    "personal-care",
   ];
 
   addRoute(http, {

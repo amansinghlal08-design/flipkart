@@ -858,8 +858,12 @@ const MINUTES_CATEGORIES: { slug: string; name: string; icon: string }[] = [
   { slug: "vegetables", name: "Vegetables", icon: "Carrot" },
   { slug: "fruits", name: "Fruits", icon: "Apple" },
   { slug: "dairy", name: "Dairy & Eggs", icon: "Milk" },
+  { slug: "bakery", name: "Bakery", icon: "Croissant" },
   { slug: "beverages", name: "Beverages", icon: "Coffee" },
   { slug: "snacks", name: "Snacks", icon: "Cookie" },
+  { slug: "frozen", name: "Frozen", icon: "Snowflake" },
+  { slug: "household", name: "Household", icon: "SprayCan" },
+  { slug: "personal-care", name: "Personal Care", icon: "Sparkles" },
 ];
 
 type MinutesProduct = {
@@ -911,6 +915,72 @@ const MINUTES_PRODUCTS: MinutesProduct[] = [
   { name: "Peanut Butter — 350 g", brand: "SnackCo", category: "snacks", unit: "350 g", price: 215, mrp: 240, rating: 4.5, ratingCount: 4910, stock: 110, badges: ["Minutes"], tags: ["peanut butter", "snack", "minutes"] },
 ];
 
+// --------------------------------------------------------------------------
+// Expanded quick-commerce catalogue (real-style brands) — appended on top of
+// the base minutes seed. Idempotent: products are matched by exact name.
+// --------------------------------------------------------------------------
+
+const MINUTES_PRODUCTS_EXTRA_A: MinutesProduct[] = [
+  // ---- dairy ----
+  { name: "Amul Taaza Toned Milk — 1 L", brand: "Amul", category: "dairy", unit: "1 L", price: 60, mrp: 64, rating: 4.5, ratingCount: 21040, stock: 300, badges: ["Minutes"], tags: ["milk", "dairy", "toned", "minutes"] },
+  { name: "Amul Gold Full Cream Milk — 500 ml", brand: "Amul", category: "dairy", unit: "500 ml", price: 34, mrp: 38, rating: 4.5, ratingCount: 12430, stock: 260, badges: [], tags: ["milk", "dairy", "full cream", "minutes"] },
+  { name: "Mother Dairy Full Cream Milk — 1 L", brand: "Mother Dairy", category: "dairy", unit: "1 L", price: 66, mrp: 70, rating: 4.4, ratingCount: 9810, stock: 240, badges: [], tags: ["milk", "dairy", "minutes"] },
+  { name: "Amul Butter — 500 g", brand: "Amul", category: "dairy", unit: "500 g", price: 265, mrp: 285, rating: 4.6, ratingCount: 8120, stock: 120, badges: ["Best Seller"], tags: ["butter", "dairy", "minutes"] },
+  { name: "Amul Cheese Slices — 200 g", brand: "Amul", category: "dairy", unit: "200 g", price: 130, mrp: 145, rating: 4.5, ratingCount: 7210, stock: 160, badges: [], tags: ["cheese", "dairy", "minutes"] },
+  { name: "Mother Dairy Curd — 400 g", brand: "Mother Dairy", category: "dairy", unit: "400 g", price: 48, mrp: 55, rating: 4.3, ratingCount: 6540, stock: 200, badges: [], tags: ["curd", "dairy", "minutes"] },
+  { name: "Amul Paneer — 200 g", brand: "Amul", category: "dairy", unit: "200 g", price: 95, mrp: 108, rating: 4.4, ratingCount: 5310, stock: 140, badges: ["Minutes"], tags: ["paneer", "dairy", "minutes"] },
+  { name: "Amul Pure Ghee — 1 L", brand: "Amul", category: "dairy", unit: "1 L", price: 640, mrp: 700, rating: 4.7, ratingCount: 2210, stock: 60, badges: [], tags: ["ghee", "dairy", "minutes"] },
+  { name: "Amul Masti Buttermilk — 1 L", brand: "Amul", category: "dairy", unit: "1 L", price: 55, mrp: 60, rating: 4.2, ratingCount: 4420, stock: 180, badges: [], tags: ["buttermilk", "dairy", "minutes"] },
+  { name: "Amul Masti Lassi — 1 L", brand: "Amul", category: "dairy", unit: "1 L", price: 75, mrp: 82, rating: 4.3, ratingCount: 3310, stock: 150, badges: [], tags: ["lassi", "dairy", "minutes"] },
+  { name: "Farm Eggs — 6 pcs", brand: "Sunrise Farms", category: "dairy", unit: "6 pcs", price: 55, mrp: 62, rating: 4.5, ratingCount: 9810, stock: 300, badges: [], tags: ["eggs", "dairy", "minutes"] },
+  { name: "Greek Yogurt — 90 g", brand: "Epigamia", category: "dairy", unit: "90 g", price: 60, mrp: 70, rating: 4.4, ratingCount: 5120, stock: 130, badges: ["Trending"], tags: ["yogurt", "dairy", "protein", "minutes"] },
+
+  // ---- bakery ----
+  { name: "100% Whole Wheat Bread — 400 g", brand: "Britannia", category: "bakery", unit: "400 g", price: 52, mrp: 58, rating: 4.4, ratingCount: 7020, stock: 180, badges: [], tags: ["bread", "bakery", "minutes"] },
+  { name: "Brown Bread — 400 g", brand: "Harvest Gold", category: "bakery", unit: "400 g", price: 48, mrp: 55, rating: 4.3, ratingCount: 8110, stock: 190, badges: [], tags: ["bread", "bakery", "minutes"] },
+  { name: "Ladi Pav — 6 pcs", brand: "Britannia", category: "bakery", unit: "6 pcs", price: 40, mrp: 45, rating: 4.3, ratingCount: 5120, stock: 170, badges: [], tags: ["pav", "bakery", "minutes"] },
+  { name: "Burger Buns — 4 pcs", brand: "Britannia", category: "bakery", unit: "4 pcs", price: 45, mrp: 50, rating: 4.2, ratingCount: 3310, stock: 150, badges: [], tags: ["buns", "bakery", "minutes"] },
+  { name: "Choco Brownie — 100 g", brand: "Theobroma", category: "bakery", unit: "100 g", price: 195, mrp: 225, rating: 4.7, ratingCount: 2210, stock: 80, badges: ["Premium"], tags: ["brownie", "bakery", "dessert", "minutes"] },
+  { name: "Vanilla Cake — 250 g", brand: "Britannia", category: "bakery", unit: "250 g", price: 55, mrp: 62, rating: 4.2, ratingCount: 4410, stock: 200, badges: [], tags: ["cake", "bakery", "minutes"] },
+  { name: "Butter Croissant — 2 pcs", brand: "BakeNest", category: "bakery", unit: "2 pcs", price: 90, mrp: 105, rating: 4.4, ratingCount: 1210, stock: 60, badges: ["New"], tags: ["croissant", "bakery", "minutes"] },
+  { name: "Oats Bread — 400 g", brand: "Harvest Gold", category: "bakery", unit: "400 g", price: 58, mrp: 64, rating: 4.3, ratingCount: 2110, stock: 120, badges: [], tags: ["bread", "bakery", "oats", "minutes"] },
+
+  // ---- grocery ----
+  { name: "India Gate Basmati Rice — 5 kg", brand: "India Gate", category: "grocery", unit: "5 kg", price: 449, mrp: 499, rating: 4.5, ratingCount: 4210, stock: 90, badges: [], tags: ["rice", "grocery", "minutes"] },
+  { name: "Aashirvaad Whole Wheat Atta — 5 kg", brand: "Aashirvaad", category: "grocery", unit: "5 kg", price: 240, mrp: 265, rating: 4.5, ratingCount: 11240, stock: 120, badges: [], tags: ["atta", "flour", "grocery", "minutes"] },
+  { name: "Tata Salt — 1 kg", brand: "Tata", category: "grocery", unit: "1 kg", price: 28, mrp: 30, rating: 4.4, ratingCount: 14210, stock: 400, badges: [], tags: ["salt", "grocery", "minutes"] },
+  { name: "Madhur Sugar — 1 kg", brand: "Madhur", category: "grocery", unit: "1 kg", price: 48, mrp: 52, rating: 4.3, ratingCount: 9810, stock: 350, badges: [], tags: ["sugar", "grocery", "minutes"] },
+  { name: "Fortune Sunflower Oil — 1 L", brand: "Fortune", category: "grocery", unit: "1 L", price: 138, mrp: 152, rating: 4.4, ratingCount: 8120, stock: 160, badges: [], tags: ["oil", "grocery", "minutes"] },
+  { name: "Toor Dal — 1 kg", brand: "Tata Sampann", category: "grocery", unit: "1 kg", price: 178, mrp: 195, rating: 4.4, ratingCount: 6210, stock: 140, badges: ["Minutes"], tags: ["dal", "pulses", "grocery", "minutes"] },
+  { name: "Maggi Noodles — 70 g x 4", brand: "Nestle", category: "grocery", unit: "4 x 70 g", price: 58, mrp: 64, rating: 4.5, ratingCount: 22140, stock: 500, badges: ["Best Seller"], tags: ["noodles", "maggi", "grocery", "minutes"] },
+  { name: "Dabur Honey — 500 g", brand: "Dabur", category: "grocery", unit: "500 g", price: 189, mrp: 220, rating: 4.5, ratingCount: 5210, stock: 130, badges: [], tags: ["honey", "grocery", "minutes"] },
+  { name: "Roasted Peanuts — 500 g", brand: "Haldiram", category: "grocery", unit: "500 g", price: 99, mrp: 115, rating: 4.2, ratingCount: 3110, stock: 200, badges: [], tags: ["peanuts", "grocery", "minutes"] },
+  { name: "Organic Brown Rice — 1 kg", brand: "Organic Tattva", category: "grocery", unit: "1 kg", price: 119, mrp: 145, rating: 4.4, ratingCount: 1810, stock: 90, badges: [], tags: ["rice", "organic", "grocery", "minutes"] },
+];
+
+const MINUTES_PRODUCTS_EXTRA_B: MinutesProduct[] = [
+  // ---- frozen ----
+  { name: "Mixed Vegetable Paratha — 400 g", brand: "Kool Freeze", category: "frozen", unit: "400 g", price: 95, mrp: 110, rating: 4.3, ratingCount: 3210, stock: 120, badges: [], tags: ["paratha", "frozen", "minutes"] },
+  { name: "Chicken Nuggets — 300 g", brand: "Yummiez", category: "frozen", unit: "300 g", price: 165, mrp: 190, rating: 4.2, ratingCount: 4120, stock: 90, badges: [], tags: ["nuggets", "frozen", "snack", "minutes"] },
+  { name: "Sweet Corn — 500 g", brand: "Greenleaf", category: "frozen", unit: "500 g", price: 75, mrp: 85, rating: 4.1, ratingCount: 2110, stock: 140, badges: [], tags: ["corn", "frozen", "minutes"] },
+  { name: "Vanilla Ice Cream — 1 L", brand: "Kwality Walls", category: "frozen", unit: "1 L", price: 249, mrp: 299, rating: 4.4, ratingCount: 9310, stock: 110, badges: ["Trending"], tags: ["ice cream", "frozen", "dessert", "minutes"] },
+  { name: "Frozen Mixed Berries — 250 g", brand: "Greenleaf", category: "frozen", unit: "250 g", price: 189, mrp: 215, rating: 4.5, ratingCount: 1210, stock: 60, badges: [], tags: ["berries", "frozen", "minutes"] },
+
+  // ---- household ----
+  { name: "Dishwash Liquid — 1 L", brand: "Vim", category: "household", unit: "1 L", price: 105, mrp: 115, rating: 4.3, ratingCount: 14210, stock: 260, badges: [], tags: ["dishwash", "household", "cleaning", "minutes"] },
+  { name: "Detergent Powder — 1 kg", brand: "Surf Excel", category: "household", unit: "1 kg", price: 125, mrp: 140, rating: 4.4, ratingCount: 11230, stock: 200, badges: [], tags: ["detergent", "household", "laundry", "minutes"] },
+  { name: "Hand Wash Refill — 750 ml", brand: "Dettol", category: "household", unit: "750 ml", price: 135, mrp: 150, rating: 4.4, ratingCount: 8210, stock: 170, badges: [], tags: ["handwash", "household", "hygiene", "minutes"] },
+  { name: "Floor Cleaner — 1 L", brand: "Lizol", category: "household", unit: "1 L", price: 119, mrp: 130, rating: 4.3, ratingCount: 5410, stock: 190, badges: [], tags: ["floor cleaner", "household", "cleaning", "minutes"] },
+  { name: "Kitchen Towel Roll — 2 ply", brand: "Scotch-Brite", category: "household", unit: "1 roll", price: 65, mrp: 75, rating: 4.2, ratingCount: 3120, stock: 210, badges: [], tags: ["kitchen towel", "household", "minutes"] },
+
+  // ---- personal-care ----
+  { name: "Toothpaste — 150 g", brand: "Colgate", category: "personal-care", unit: "150 g", price: 95, mrp: 105, rating: 4.4, ratingCount: 19320, stock: 320, badges: [], tags: ["toothpaste", "personal care", "oral", "minutes"] },
+  { name: "Face Wash — 100 g", brand: "Himalaya", category: "personal-care", unit: "100 g", price: 145, mrp: 160, rating: 4.3, ratingCount: 7120, stock: 150, badges: [], tags: ["face wash", "personal care", "minutes"] },
+  { name: "Body Lotion — 250 ml", brand: "Nivea", category: "personal-care", unit: "250 ml", price: 199, mrp: 230, rating: 4.4, ratingCount: 5320, stock: 120, badges: [], tags: ["lotion", "personal care", "minutes"] },
+  { name: "Shampoo — 340 ml", brand: "Head & Shoulders", category: "personal-care", unit: "340 ml", price: 165, mrp: 190, rating: 4.3, ratingCount: 8910, stock: 160, badges: [], tags: ["shampoo", "personal care", "minutes"] },
+  { name: "Sanitizer Spray — 200 ml", brand: "Lifebuoy", category: "personal-care", unit: "200 ml", price: 85, mrp: 95, rating: 4.2, ratingCount: 6210, stock: 240, badges: [], tags: ["sanitizer", "personal care", "hygiene", "minutes"] },
+];
+
 export const ensureMinutesCatalog = mutation({
   args: {},
   handler: async (ctx) => {
@@ -935,7 +1005,13 @@ export const ensureMinutesCatalog = mutation({
     const names = new Set(existingProducts.map((p) => p.name));
     const now = Date.now();
 
-    for (const [index, product] of MINUTES_PRODUCTS.entries()) {
+    const allMinutesProducts = [
+      ...MINUTES_PRODUCTS,
+      ...MINUTES_PRODUCTS_EXTRA_A,
+      ...MINUTES_PRODUCTS_EXTRA_B,
+    ];
+
+    for (const [index, product] of allMinutesProducts.entries()) {
       if (names.has(product.name)) continue;
       await ctx.db.insert("products", {
         name: product.name,
@@ -961,6 +1037,6 @@ export const ensureMinutesCatalog = mutation({
       added += 1;
     }
 
-    return { added, products: MINUTES_PRODUCTS.length };
+    return { added, products: allMinutesProducts.length };
   },
 });

@@ -1181,6 +1181,206 @@
         .scroll-top:hover {
             transform: translateY(-4px);
         }
+
+        /* Location Gate (address-first flow) */
+        #locationGate {
+            position: fixed;
+            inset: 0;
+            background: var(--white);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .gate-card {
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+        }
+
+        .gate-icon {
+            width: 84px;
+            height: 84px;
+            margin: 0 auto 20px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .gate-card h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .gate-card p {
+            color: var(--text-light);
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .gate-stores {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .gate-store {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: var(--transition);
+            background: var(--white);
+        }
+
+        .gate-store:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow);
+        }
+
+        .gate-store.selected {
+            border-color: var(--primary);
+            background: #eaf1fd;
+        }
+
+        .gate-store i {
+            font-size: 20px;
+            color: var(--primary);
+            width: 36px;
+            height: 36px;
+            background: var(--bg);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .gate-store .gs-name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .gate-store .gs-meta {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+
+        .gate-store .gs-eta {
+            margin-left: auto;
+            background: #e8f5e9;
+            color: var(--success);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        .gate-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-light);
+            font-size: 12px;
+            margin: 4px 0 16px;
+        }
+
+        .gate-divider::before,
+        .gate-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .gate-pincode {
+            display: flex;
+            gap: 8px;
+        }
+
+        .gate-pincode input {
+            flex: 1;
+            padding: 12px 14px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 15px;
+            letter-spacing: 1px;
+        }
+
+        .gate-pincode input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .gate-pincode button {
+            padding: 12px 20px;
+            border: none;
+            background: var(--primary);
+            color: white;
+            border-radius: var(--radius);
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .gate-pincode button:hover {
+            background: var(--primary-dark);
+        }
+
+        .gate-error {
+            color: #c62828;
+            font-size: 13px;
+            margin-top: 10px;
+            min-height: 18px;
+        }
+
+        .deliver-to {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            max-width: 100%;
+        }
+
+        .deliver-to:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .deliver-to i {
+            color: var(--success);
+            flex-shrink: 0;
+        }
+
+        .deliver-to span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .deliver-to b {
+            color: var(--primary);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -1214,6 +1414,11 @@
                 </button>
             </div>
             
+            <div class="deliver-to" id="deliverToChip" onclick="openLocationGate()" title="Change delivery location">
+                <i class="fas fa-map-marker-alt"></i>
+                <span id="deliverToText">Set location to see products</span>
+            </div>
+
             <div class="header-actions">
                 <button class="header-btn" onclick="router.navigate('orders')">
                     <i class="fas fa-box"></i>
@@ -1231,6 +1436,24 @@
             </div>
         </div>
     </header>
+
+    <!-- Location Gate (address-first flow) -->
+    <div id="locationGate">
+        <div class="gate-card">
+            <div class="gate-icon">
+                <i class="fas fa-map-marker-alt"></i>
+            </div>
+            <h2>Deliver to your address</h2>
+            <p>Choose a store near you to see what's available in minutes</p>
+            <div class="gate-stores" id="gateStores"></div>
+            <div class="gate-divider"><span>or use a pincode</span></div>
+            <div class="gate-pincode">
+                <input type="tel" id="gatePincode" placeholder="Enter 6-digit pincode" maxlength="6" inputmode="numeric">
+                <button id="gatePincodeBtn" onclick="applyPincode()">Apply</button>
+            </div>
+            <div class="gate-error" id="gateError"></div>
+        </div>
+    </div>
 
     <!-- Main Container -->
     <div class="container">
@@ -1265,6 +1488,22 @@
                 <div class="category-chip" data-category="snacks" onclick="filterCategory('snacks')">
                     <i class="fas fa-cookie"></i>
                     <span>Snacks</span>
+                </div>
+                <div class="category-chip" data-category="bakery" onclick="filterCategory('bakery')">
+                    <i class="fas fa-bread-slice"></i>
+                    <span>Bakery</span>
+                </div>
+                <div class="category-chip" data-category="frozen" onclick="filterCategory('frozen')">
+                    <i class="fas fa-snowflake"></i>
+                    <span>Frozen</span>
+                </div>
+                <div class="category-chip" data-category="household" onclick="filterCategory('household')">
+                    <i class="fas fa-spray-can"></i>
+                    <span>Household</span>
+                </div>
+                <div class="category-chip" data-category="personal-care" onclick="filterCategory('personal-care')">
+                    <i class="fas fa-hand-sparkles"></i>
+                    <span>Personal Care</span>
                 </div>
             </div>
 
@@ -1484,8 +1723,12 @@
                             <span>Verify & Login</span>
                             <i class="fas fa-check"></i>
                         </button>
+                        <div id="otpDemoBanner" style="display:none;background:#fff3e0;color:#e65100;border:1px dashed #fb641b;border-radius:var(--radius);padding:12px 16px;font-size:13px;margin-bottom:16px;text-align:center;">
+                            <b style="font-size:15px;">Your code: <span id="otpDemoCode" style="font-size:20px;letter-spacing:4px;font-weight:800;">------</span></b>
+                            <div style="margin-top:4px;">Demo mode — no email service key configured yet. Use this code to log in.</div>
+                        </div>
                         <div class="resend-code">
-                            Demo build — any 6-digit code works. Didn't receive? <a onclick="resendOTP()">Resend</a>
+                            Didn't receive? <a onclick="resendOTP()">Resend</a>
                         </div>
                     </div>
                 </div>
@@ -1544,12 +1787,16 @@
         // Category metadata used to generate product artwork (the gateway
         // serves structured data, not image files — artwork is drawn inline).
         const CATEGORY_META = {
-            grocery:    { emoji: '🛒', color: '#e8f5e9' },
-            vegetables: { emoji: '🥕', color: '#fff3e0' },
-            fruits:     { emoji: '🍎', color: '#fce4ec' },
-            dairy:      { emoji: '🥛', color: '#e3f2fd' },
-            beverages:  { emoji: '☕', color: '#ede7f6' },
-            snacks:     { emoji: '🍪', color: '#fff8e1' }
+            grocery:       { emoji: '🛒', color: '#e8f5e9' },
+            vegetables:    { emoji: '🥕', color: '#fff3e0' },
+            fruits:        { emoji: '🍎', color: '#fce4ec' },
+            dairy:         { emoji: '🥛', color: '#e3f2fd' },
+            bakery:        { emoji: '🍞', color: '#fdf3d8' },
+            beverages:     { emoji: '☕', color: '#ede7f6' },
+            snacks:        { emoji: '🍪', color: '#fff8e1' },
+            frozen:        { emoji: '🧊', color: '#e0f2f1' },
+            household:     { emoji: '🧴', color: '#e8eaf6' },
+            'personal-care': { emoji: '🧼', color: '#fce4ec' }
         };
         const CATEGORY_ALIAS = { groceries: 'grocery' };
 
@@ -1576,9 +1823,25 @@
             currentCategory: 'all',
             requestId: null,
             pendingPhone: '',
+            location: null,
+            otpCode: null,
             isLoading: false,
             dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
         };
+
+        // Stores the quick-commerce pickup points; the gate renders them as
+        // one-tap options mirroring GET /api/v2/locations/pickup-points.
+        const PICKUP_POINTS = [
+            { id: 'pp-1', name: 'Staple Minutes — MG Road', city: 'Bengaluru', pincode: '560001', etaMinutes: 10, open: true },
+            { id: 'pp-2', name: 'Staple Minutes — Indiranagar', city: 'Bengaluru', pincode: '560038', etaMinutes: 14, open: true },
+            { id: 'pp-3', name: 'Staple Kiosk — Connaught Place', city: 'New Delhi', pincode: '110001', etaMinutes: 9, open: true },
+            { id: 'pp-4', name: 'Staple Minutes — Linking Road', city: 'Mumbai', pincode: '400052', etaMinutes: 12, open: true },
+            { id: 'pp-5', name: 'Staple Kiosk — Anna Nagar', city: 'Chennai', pincode: '600040', etaMinutes: 10, open: false }
+        ];
+
+        const VALID_PINCODES = PICKUP_POINTS
+            .filter((p) => p.open)
+            .reduce((acc, p) => { acc[p.pincode] = p; return acc; }, {});
 
         // localStorage persistence (per user)
         const storage = { // per-user persistence
@@ -1595,7 +1858,11 @@
             getOrders: () => {
                 try { return JSON.parse(localStorage.getItem(storage.ordersKey())) || []; } catch (e) { return []; }
             },
-            setOrders: (orders) => localStorage.setItem(storage.ordersKey(), JSON.stringify(orders))
+            setOrders: (orders) => localStorage.setItem(storage.ordersKey(), JSON.stringify(orders)),
+            getLocation: () => {
+                try { return JSON.parse(localStorage.getItem('fk_location')); } catch (e) { return null; }
+            },
+            setLocation: (loc) => loc ? localStorage.setItem('fk_location', JSON.stringify(loc)) : localStorage.removeItem('fk_location')
         };
 
         // Router
@@ -1729,9 +1996,96 @@
             }
         }
 
+        // ====================================================================
+        // LOCATION GATE — address-first flow (mirrors Flipkart Minutes:
+        // products only appear after a store/pincode is selected).
+        // ====================================================================
+
+        function restoreLocation() {
+            state.location = storage.getLocation();
+            return state.location;
+        }
+
+        function renderGateStores() {
+            const container = document.getElementById('gateStores');
+            if (!container) return;
+            container.innerHTML = PICKUP_POINTS.filter(p => p.open).map(p => `
+                <div class="gate-store" data-point="${p.id}" onclick="selectGateStore('${p.id}')">
+                    <i class="fas fa-store"></i>
+                    <div>
+                        <div class="gs-name">${p.name}</div>
+                        <div class="gs-meta">${p.city} · ${p.pincode}</div>
+                    </div>
+                    <div class="gs-eta"><i class="fas fa-bolt"></i> ${p.etaMinutes} min</div>
+                </div>
+            `).join('');
+        }
+
+        function selectGateStore(id) {
+            const point = PICKUP_POINTS.find(p => p.id === id);
+            if (!point) return;
+            confirmLocation(point);
+        }
+
+        function applyPincode() {
+            const input = document.getElementById('gatePincode');
+            const error = document.getElementById('gateError');
+            const pin = (input ? input.value : '').replace(/\D/g, '');
+            if (pin.length !== 6) {
+                if (error) error.textContent = 'Please enter a valid 6-digit pincode.';
+                return;
+            }
+            const point = VALID_PINCODES[pin];
+            if (!point) {
+                if (error) error.textContent = 'We don\'t deliver to this pincode yet — pick a store above.';
+                return;
+            }
+            if (error) error.textContent = '';
+            confirmLocation(point);
+        }
+
+        function confirmLocation(point) {
+            state.location = {
+                id: point.id,
+                name: point.name,
+                city: point.city,
+                pincode: point.pincode,
+                etaMinutes: point.etaMinutes
+            };
+            storage.setLocation(state.location);
+            updateDeliverTo();
+            document.getElementById('locationGate').style.display = 'none';
+            showToast('Delivering to ' + point.name.split(' — ')[0], 'success');
+            // Products only load after an address is confirmed — like the real app.
+            if (state.allItems.length === 0 && !state.dataSource.loaded) {
+                loadCatalog();
+            }
+        }
+
+        function openLocationGate() {
+            renderGateStores();
+            const error = document.getElementById('gateError');
+            if (error) error.textContent = '';
+            const pin = document.getElementById('gatePincode');
+            if (pin) pin.value = '';
+            document.getElementById('locationGate').style.display = 'flex';
+            if (pin) setTimeout(() => pin.focus(), 100);
+        }
+
+        function updateDeliverTo() {
+            const chip = document.getElementById('deliverToText');
+            if (!chip) return;
+            if (state.location) {
+                chip.innerHTML = `Deliver to <b>${state.location.pincode}</b> · ${state.location.etaMinutes} min`;
+            } else {
+                chip.innerHTML = 'Set location to see products';
+            }
+        }
+
         async function loadCatalog() { // fetch catalogue
             const gate = GATEWAY ? `${GATEWAY}/api/v2/minutes/catalog` : '';
             const started = Date.now();
+            state.dataSource = { source: 'pending', loaded: false, endpoint: '', latencyMs: 0, count: 0, error: '' };
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 8000);
             try {
@@ -1740,7 +2094,7 @@
                 if (data.ok && data.data && data.data.items && data.data.items.length) {
                     state.allItems = data.data.items.map(toProduct);
                     state.products = state.allItems;
-                    state.dataSource = { source: 'api', endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: state.allItems.length, error: '' };
+                    state.dataSource = { source: 'api', loaded: true, endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: state.allItems.length, error: '' };
                     renderHomeProducts();
                     renderDataStatus();
                     return;
@@ -1748,7 +2102,7 @@
                 throw new Error(data && data.error ? data.error : 'empty catalogue');
             } catch (e) {
                 // Gateway unreachable — fall back to the local catalogue
-                state.dataSource = { source: 'local', endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: FALLBACK_PRODUCTS.length, error: (e && e.message ? e.message : String(e)).slice(0, 80) };
+                state.dataSource = { source: 'local', loaded: true, endpoint: '/api/v2/minutes/catalog', latencyMs: Date.now() - started, count: FALLBACK_PRODUCTS.length, error: (e && e.message ? e.message : String(e)).slice(0, 80) };
                 state.allItems = FALLBACK_PRODUCTS.map(p => ({ ...p, image: productImage(p) }));
                 state.products = state.allItems;
                 renderHomeProducts();
@@ -1859,6 +2213,7 @@
 
             state.pendingPhone = phone;
             state.requestId = 'req_' + Date.now();
+            state.otpCode = null;
 
             try {
                 if (GATEWAY) {
@@ -1869,6 +2224,13 @@
                     });
                     const data = await res.json();
                     if (!data.ok) throw new Error(data.error || 'Failed to send OTP');
+                    // Real OTP delivery is on when RESEND_API_KEY is configured
+                    // (meta.delivered === true). Without a key the gateway runs
+                    // in demo mode and returns the code as meta.demoCode — we
+                    // surface it so login actually works.
+                    if (data.meta && data.meta.demoCode) {
+                        state.otpCode = String(data.meta.demoCode);
+                    }
                 }
                 showOtpStep();
             } catch (e) {
@@ -1884,6 +2246,13 @@
         function showOtpStep() {
             document.getElementById('phoneStep').style.display = 'none';
             document.getElementById('otpStep').style.display = 'block';
+            // Show the demo code returned by the gateway (no email key configured)
+            const banner = document.getElementById('otpDemoBanner');
+            const codeEl = document.getElementById('otpDemoCode');
+            if (banner && codeEl && state.otpCode) {
+                codeEl.textContent = state.otpCode;
+                banner.style.display = 'block';
+            }
             setTimeout(() => document.querySelector('.otp-input') && document.querySelector('.otp-input').focus(), 100);
         }
 
@@ -2287,8 +2656,19 @@
             // Check auth status
             checkAuth();
 
-            // Load the quick-commerce catalogue (real API when available)
-            loadCatalog();
+            // Address-first flow: restore a saved location, otherwise show the
+            // location gate. Products load only after an address is confirmed.
+            restoreLocation();
+            updateDeliverTo();
+            if (state.location) {
+                // Saved location — hide the gate and load straight to products.
+                document.getElementById('locationGate').style.display = 'none';
+                loadCatalog();
+            } else {
+                state.dataSource = { source: 'pending', loaded: false, endpoint: '', latencyMs: 0, count: 0, error: '' };
+                renderDataStatus();
+                openLocationGate();
+            }
 
             // Setup event listeners
             setupEventListeners();
