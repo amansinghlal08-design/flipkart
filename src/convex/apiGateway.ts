@@ -641,16 +641,15 @@ export function registerApiRoutes(http: Router): void {
   });
 
   // ============ Orders ============
-  addRoute(http, {
-    path: "/api/5/self-serve/orders",
-    method: "GET",
-    handler: async (ctx, request) => {
-      const ref = { endpoint: "/api/5/self-serve/orders", method: "GET" };
-      const upstream = await tryFlipkart(ctx, ref, "GET", "/api/5/self-serve/orders" + new URL(request.url).search);
-      if (upstream) return upstream;
-      return sessionScoped(ref);
-    },
-  });
+  // Captured surface uses a trailing slash: /api/5/self-serve/orders/?page=1
+  const ordersHandler: Handler = async (ctx, request) => {
+    const ref = { endpoint: "/api/5/self-serve/orders", method: "GET" };
+    const upstream = await tryFlipkart(ctx, ref, "GET", "/api/5/self-serve/orders" + new URL(request.url).search);
+    if (upstream) return upstream;
+    return sessionScoped(ref);
+  };
+  addRoute(http, { path: "/api/5/self-serve/orders", method: "GET", handler: ordersHandler });
+  addRoute(http, { path: "/api/5/self-serve/orders/", method: "GET", handler: ordersHandler });
 
   addRoute(http, {
     path: "/api/1/orders/place",
