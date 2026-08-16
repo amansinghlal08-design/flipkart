@@ -14,6 +14,7 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Shop = lazy(() => import("./pages/Shop.tsx"));
+const ApiExplorer = lazy(() => import("./pages/ApiExplorer.tsx"));
 const ProductDetail = lazy(() => import("./pages/ProductDetail.tsx"));
 const Cart = lazy(() => import("./pages/Cart.tsx"));
 const Checkout = lazy(() => import("./pages/Checkout.tsx"));
@@ -131,6 +132,7 @@ createRoot(document.getElementById("root")!).render(
               <Route element={<StoreLayout />}>
                 <Route path="/" element={<Landing />} />
                 <Route path="/shop" element={<Shop />} />
+                <Route path="/api" element={<ApiExplorer />} />
                 <Route path="/product/:id" element={<ProductDetail />} />
                 <Route
                   path="/cart"

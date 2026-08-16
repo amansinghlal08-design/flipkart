@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, QueryCtx } from "./_generated/server";
+import { v } from "convex/values";
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.
@@ -16,6 +17,23 @@ export const currentUser = query({
     }
 
     return user;
+  },
+});
+
+/**
+ * Public lookup used by POST /api/6/user/signup/status — mirrors the
+ * signup-status endpoint from the capture: checks whether an account exists.
+ */
+export const emailExists = query({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized.includes("@")) return null;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", normalized))
+      .first();
+    return user !== null;
   },
 });
 

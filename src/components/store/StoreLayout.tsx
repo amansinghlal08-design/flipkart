@@ -258,13 +258,17 @@ function Footer() {
           </div>
           <div>
             <h4 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-400">
-              Fine print
+              Platform
             </h4>
-            <ul className="mt-4 space-y-2.5 text-[13px] text-neutral-500">
-              <li>Free delivery over ₹499</li>
-              <li>7-day no-questions returns</li>
-              <li>Pay with wallet, card or COD</li>
-              <li>Support: 1800-STAPLE (9am–9pm)</li>
+            <ul className="mt-4 space-y-2.5">
+              <li>
+                <Link to="/api" className={linkClass}>
+                  API reference
+                </Link>
+              </li>
+              <li className="text-[13px] text-neutral-500">Free delivery over ₹499</li>
+              <li className="text-[13px] text-neutral-500">7-day no-questions returns</li>
+              <li className="text-[13px] text-neutral-500">Pay with wallet, card or COD</li>
             </ul>
           </div>
         </div>
