@@ -1825,6 +1825,7 @@
             pendingPhone: '',
             location: null,
             otpCode: null,
+            flipkartLive: false,
             isLoading: false,
             dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
         };
@@ -2093,6 +2094,7 @@
             // Products only load after an address is confirmed — like the real app.
             if (state.allItems.length === 0 && !state.dataSource.loaded) {
                 loadCatalog();
+                checkDataStatus();
             }
         }
 
@@ -2114,6 +2116,20 @@
             } else {
                 chip.innerHTML = 'Set location to see products';
             }
+        }
+
+        // Asks the gateway whether Flipkart session creds are configured, so the
+        // banner can show "Flipkart live" vs "mirror". Never blocks the page.
+        async function checkDataStatus() {
+            if (!GATEWAY) return;
+            try {
+                const res = await fetch(GATEWAY + '/api/v2/status');
+                const data = await res.json();
+                if (data.ok && data.data) {
+                    state.flipkartLive = !!data.data.flipkartConfigured;
+                    renderDataStatus();
+                }
+            } catch (e) { /* offline — keep mirror banner */ }
         }
 
         async function loadCatalog() { // fetch catalogue
@@ -2151,10 +2167,20 @@
             const el = document.getElementById('dataStatus');
             if (!el) return;
             const s = state.dataSource || {};
-            if (s.source === 'api') {
-                el.textContent = 'Live data: ' + s.count + ' items from GET ' + s.endpoint + ' (' + s.latencyMs + ' ms)';
-                el.style.background = '#e8f5e9';
-                el.style.color = '#1b5e20';
+            if (s.source === 'flipkart') {
+                el.textContent = 'Live from Flipkart API: GET ' + s.endpoint + ' (' + s.latencyMs + ' ms) — real session data';
+                el.style.background = '#e3f2fd';
+                el.style.color = '#0d47a1';
+            } else if (s.source === 'api') {
+                if (state.flipkartLive) {
+                    el.textContent = 'Connected to Flipkart live (2.rome.api.flipkart.com) — catalogue ' + s.count + ' items, search & OTP proxy to your real session';
+                    el.style.background = '#e3f2fd';
+                    el.style.color = '#0d47a1';
+                } else {
+                    el.textContent = 'Live data: ' + s.count + ' items from GET ' + s.endpoint + ' (' + s.latencyMs + ' ms) — add Flipkart session keys to pull live 2.rome.api.flipkart.com data';
+                    el.style.background = '#e8f5e9';
+                    el.style.color = '#1b5e20';
+                }
             } else if (s.source === 'local') {
                 el.textContent = 'Offline mode: gateway unreachable (' + (s.error || 'unknown error') + ') - showing sample data';
                 el.style.background = '#fff3e0';
@@ -2701,6 +2727,7 @@
                 // Saved location — hide the gate and load straight to products.
                 document.getElementById('locationGate').style.display = 'none';
                 loadCatalog();
+                checkDataStatus();
             } else {
                 state.dataSource = { source: 'pending', loaded: false, endpoint: '', latencyMs: 0, count: 0, error: '' };
                 renderDataStatus();

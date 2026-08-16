@@ -26,6 +26,36 @@ function requestId(): string {
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Optional passthrough to the real Flipkart mobile API (2.rome.api.flipkart.com).
+ * Returns a gateway Response when Flipkart creds are configured AND the
+ * upstream answers; returns null so the caller falls back to the in-app mirror.
+ * `forwardHeaders` lets the response carry Flipkart's own tracking headers.
+ */
+async function tryFlipkart(
+  ctx: Parameters<Parameters<typeof httpAction>[0]>[0],
+  ref: Ref,
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<Response | null> {
+  const result = await ctx.runAction(api.flipkartProxy.proxyFlipkart, {
+    method,
+    path,
+    body,
+  } as never);
+  if (!result.configured) return null; // no creds → mirror
+  if (!result.ok || result.status >= 500) {
+    // Upstream error — fall back to the mirror rather than fail the page.
+    return null;
+  }
+  const source = "flipkart-live";
+  if (ref.endpoint === "/api/4/page/fetch") {
+    return ok(ref, { proxy: true, flipkart: result.data }, { source, upstreamStatus: result.status });
+  }
+  return ok(ref, { proxy: true, flipkart: result.data }, { source, upstreamStatus: result.status });
+}
+
 function reply(
   ref: Ref,
   status: number,
@@ -170,6 +200,15 @@ export function registerApiRoutes(http: Router): void {
           "Send { phone } (10-digit) or { email } in the request body.",
         );
       }
+
+      // Live Flipkart OTP — forwards to the real /api/7/user/otp/generate so
+      // Flipkart sends the actual SMS to the number. Falls back to our mirror.
+      const upstream = await tryFlipkart(ctx, ref, "POST", "/api/7/user/otp/generate", {
+        phone: phoneDigits,
+        email: emailStr.includes("@") ? emailStr : undefined,
+      });
+      if (upstream) return upstream;
+
       const result = await ctx.runAction(api.otp.sendOtp, {
         phone: phoneDigits || undefined,
         email: emailStr.includes("@") ? emailStr : undefined,
@@ -474,6 +513,17 @@ export function registerApiRoutes(http: Router): void {
     handler: async (ctx, request) => {
       const ref = { endpoint: "/api/4/page/fetch", method: "GET" };
       const cacheFirst = new URL(request.url).searchParams.get("cacheFirst");
+
+      // Live Flipkart first — when session creds are configured this returns
+      // the real layout & data from 2.rome.api.flipkart.com.
+      const upstream = await tryFlipkart(
+        ctx,
+        ref,
+        "GET",
+        `/api/4/page/fetch?cacheFirst=${cacheFirst === "true" ? "true" : "false"}`,
+      );
+      if (upstream) return upstream;
+
       const [categories, deals, featured, catalog] = await Promise.all([
         ctx.runQuery(api.products.listCategories, {}),
         ctx.runQuery(api.products.dealProducts, { limit: 8 }),
@@ -494,7 +544,7 @@ export function registerApiRoutes(http: Router): void {
           featured,
           catalogSize: catalog.length,
         },
-        { generatedAt: Date.now() },
+        { generatedAt: Date.now(), source: "mirror" },
       );
     },
   });
@@ -549,6 +599,16 @@ export function registerApiRoutes(http: Router): void {
       const sort = SORTS.includes(rawSort as (typeof SORTS)[number])
         ? (rawSort as (typeof SORTS)[number])
         : undefined;
+
+      // Live Flipkart search first (when session creds are configured).
+      const upstream = await tryFlipkart(
+        ctx,
+        ref,
+        "GET",
+        `/api/v2/search?q=${encodeURIComponent(q ?? "")}${category ? `&category=${encodeURIComponent(category)}` : ""}`,
+      );
+      if (upstream) return upstream;
+
       const products = await ctx.runQuery(api.products.listProducts, {
         q,
         category,
@@ -559,6 +619,7 @@ export function registerApiRoutes(http: Router): void {
         query: q ?? null,
         category: category ?? null,
         sort: sort ?? "featured",
+        source: "mirror",
       });
     },
   });
@@ -701,6 +762,22 @@ export function registerApiRoutes(http: Router): void {
 // ====================================================================
 
 export function registerV2ApiRoutes(http: Router): void {
+  // ---------- Status / data source ----------
+  addRoute(http, {
+    path: "/api/v2/status",
+    method: "GET",
+    handler: async (ctx) => {
+      const ref = { endpoint: "/api/v2/status", method: "GET" };
+      const flipkart = await ctx.runAction(api.flipkartProxy.flipkartStatus, {});
+      return ok(ref, {
+        source: flipkart.configured ? "flipkart-live" : "mirror",
+        flipkartConfigured: flipkart.configured,
+        channels: flipkart.channels,
+        upstream: "https://2.rome.api.flipkart.com",
+      });
+    },
+  });
+
   // ---------- Search & discovery ----------
   addRoute(http, {
     path: "/api/v2/search/suggestions",
