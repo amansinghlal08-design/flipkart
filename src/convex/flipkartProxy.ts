@@ -197,6 +197,11 @@ export const touchSession = mutation({
  *  - step "sendOtp"  → sends a real SMS OTP, returns the requestId
  *  - step "verifyOtp" → verifies the code, returns the real session tokens
  * The caller persists the returned device profile + tokens in flipkartSessions.
+ *
+ * sendOtp is TWO-PHASE, exactly like the working reference client:
+ *  1. First call establishes a guest SESSION (at / sn / vid / secureToken).
+ *  2. Retries carry those session headers — Flipkart only dispatches the SMS
+ *     (returns a requestId) once the session headers are present.
  */
 export const flipkartAuth = action({
   args: {
@@ -207,13 +212,18 @@ export const flipkartAuth = action({
     deviceId: v.optional(v.string()),
     visitId: v.optional(v.string()),
     dcId: v.optional(v.string()),
+    // guest session captured during sendOtp — required for verifyOtp
+    sessionAt: v.optional(v.string()),
+    sessionSn: v.optional(v.string()),
+    sessionVid: v.optional(v.string()),
+    sessionSecureToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const phone = args.phone.replace(/\D/g, "");
     const deviceId = args.deviceId ?? newDeviceId();
     const visitId = args.visitId ?? newVisitId();
     const userAgent = fkuaUserAgent(deviceId);
-    const headers: Record<string, string> = {
+    const baseHeaders: Record<string, string> = {
       "content-type": "application/json; charset=UTF-8",
       "user-agent": userAgent,
       "x-user-agent": userAgent,
@@ -247,26 +257,90 @@ export const flipkartAuth = action({
           clientQueryParamMap: null,
         },
       };
-      const { dc: newDc, status, data } = await romeFetch(dc, "POST", "/1/action/view", headers, body);
-      dc = newDc;
-      const anyData = data as {
-        RESPONSE?: { actionSuccess?: boolean; actionResponseContext?: { requestId?: string } };
-      } | null;
-      const success = Boolean(anyData?.RESPONSE?.actionSuccess);
-      const requestId = anyData?.RESPONSE?.actionResponseContext?.requestId ?? null;
+      // Phase 1: establish a guest session; then retry with the session
+      // headers until Flipkart dispatches the OTP (returns a requestId).
+      // Matches the reference client: it retries with backoff after the
+      // first response hands over the guest session, and only then does
+      // Flipkart dispatch the SMS.
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      let session: Record<string, string> = {};
+      let lastStatus = 0;
+      let lastData: unknown = null;
+      let lastDc = dc;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const hdrs = { ...baseHeaders, ...session };
+        const res = await romeFetch(lastDc, "POST", "/1/action/view", hdrs, body);
+        lastDc = res.dc;
+        lastStatus = res.status;
+        lastData = res.data;
+        const S = (res.data as { SESSION?: Record<string, string | undefined> } | null)?.SESSION;
+        if (S) {
+          const next: Record<string, string> = {};
+          if (S.at) next.at = S.at;
+          if (S.sn) next.sn = S.sn;
+          if (S.vid) next.vid = S.vid;
+          if (S.secureToken) next.secureToken = S.secureToken;
+          if (Object.keys(next).length) session = next;
+        }
+        // Defensive: scan the whole payload for a requestId (some response
+        // shapes nest it deeper than actionResponseContext).
+        let requestId: string | null = null;
+        const walk = (value: unknown, depth: number): void => {
+          if (requestId || depth > 8 || !value || typeof value !== "object") return;
+          if (Array.isArray(value)) {
+            value.forEach((v) => walk(v, depth + 1));
+            return;
+          }
+          for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            if (k.toLowerCase() === "requestid" && typeof v === "string") {
+              requestId = v;
+              return;
+            }
+            if (v && typeof v === "object") walk(v, depth + 1);
+          }
+        };
+        walk(res.data, 0);
+        if (requestId) {
+          return {
+            ok: true,
+            status: res.status,
+            dc: lastDc,
+            deviceId,
+            visitId,
+            userAgent,
+            requestId,
+            session,
+            data: res.data,
+          };
+        }
+        // No requestId yet — back off before the next attempt (the SMS
+        // dispatch only happens once the session from this response is
+        // presented on a follow-up call).
+        if (attempt < 3) await sleep(700 * (attempt + 1));
+      }
+      // Exhausted retries — surface the last response so the caller can
+      // decide (fall back to the mirror stack or show the real error).
       return {
-        ok: status < 400 && success,
-        status,
-        dc,
+        ok: false,
+        status: lastStatus,
+        dc: lastDc,
         deviceId,
         visitId,
         userAgent,
-        requestId,
-        data,
+        requestId: null,
+        session: Object.keys(session).length ? session : null,
+        data: lastData,
       };
     }
 
-    // verifyOtp
+    // verifyOtp — same payload as the reference client, with the guest
+    // session headers captured during sendOtp.
+    const sessionHeaders: Record<string, string> = {};
+    if (args.sessionAt) sessionHeaders.at = args.sessionAt;
+    if (args.sessionSn) sessionHeaders.sn = args.sessionSn;
+    if (args.sessionVid) sessionHeaders.vid = args.sessionVid;
+    if (args.sessionSecureToken) sessionHeaders.secureToken = args.sessionSecureToken;
+    const headers = { ...baseHeaders, ...sessionHeaders };
     const body = {
       actionRequestContext: {
         type: "LOGIN_SHOPSY2",

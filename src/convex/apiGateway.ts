@@ -241,18 +241,33 @@ export function registerApiRoutes(http: Router): void {
       // to POST /1/action/view so Flipkart texts the number, and opens a
       // pending session row so verification captures the real tokens.
       // Falls back to our own OTP stack (Twilio SMS or demo code) on error.
+      let flipkartOtpError: string | undefined;
       if (phoneDigits) {
         try {
-          const fk = await ctx.runAction(api.flipkartProxy.flipkartAuth, {
+          const fk = (await ctx.runAction(api.flipkartProxy.flipkartAuth, {
             step: "sendOtp",
             phone: phoneDigits,
-          } as never);
+          } as never)) as {
+            ok?: boolean;
+            requestId?: string | null;
+            session?: Record<string, string> | null;
+            deviceId?: string;
+            visitId?: string;
+            dc?: string;
+            userAgent?: string;
+            status?: number;
+          };
           if (fk && fk.ok && fk.requestId) {
+            const guest = fk.session as Record<string, string> | null | undefined;
             await ctx
               .runMutation(api.flipkartProxy.upsertFlipkartSession, {
                 phone: phoneDigits,
                 status: "pending",
                 requestId: fk.requestId as string | undefined,
+                accessToken: guest?.at as string | undefined,
+                sn: guest?.sn as string | undefined,
+                vid: guest?.vid as string | undefined,
+                secureToken: guest?.secureToken as string | undefined,
                 deviceId: fk.deviceId as string | undefined,
                 visitId: fk.visitId as string | undefined,
                 dcId: fk.dc as string | undefined,
@@ -278,6 +293,42 @@ export function registerApiRoutes(http: Router): void {
         } catch (e) {
           // Flipkart flow failed — fall through to the mirror OTP stack.
         }
+        // The real path was attempted but Flipkart did not dispatch an SMS
+        // (unregistered number, rate-limit, or unreachable). Surface why,
+        // so the UI doesn't pretend a demo code is the real flow.
+        try {
+          const fk = (await ctx.runAction(api.flipkartProxy.flipkartAuth, {
+            step: "sendOtp",
+            phone: phoneDigits,
+          } as never)) as {
+            ok?: boolean;
+            status?: number;
+            requestId?: string | null;
+            data?: unknown;
+          };
+          const fkErr =
+            (fk.data as { ERROR_MESSAGE?: string } | null)?.ERROR_MESSAGE ??
+            (fk.data as { RESPONSE?: { actionResponseContext?: { errorMessage?: { message?: { text?: string } } } } } | null)
+              ?.RESPONSE?.actionResponseContext?.errorMessage?.message?.text ??
+            "";
+          const dataObj = fk.data as { RESPONSE?: { actionSuccess?: boolean } } | null;
+          // Flipkart answered but rendered the phone-entry screen instead of
+          // dispatching — usually an unregistered/invalid number or a flag.
+          const dispatched = Boolean(fk.requestId);
+          const renderedLoginScreen = Boolean(dataObj?.RESPONSE?.actionSuccess && !dispatched);
+          if (fkErr) {
+            flipkartOtpError = `Flipkart rejected this number (${fkErr})`;
+          } else if (renderedLoginScreen) {
+            flipkartOtpError =
+              "Flipkart didn't send an OTP to this number — it may not be registered with Flipkart, or the number is blocked";
+          } else if (fk.status && fk.status >= 400) {
+            flipkartOtpError = `Flipkart returned HTTP ${fk.status}`;
+          } else {
+            flipkartOtpError = "Flipkart's OTP service didn't respond";
+          }
+        } catch {
+          flipkartOtpError = "Flipkart OTP service unreachable";
+        }
       }
       const result = await ctx.runAction(api.otp.sendOtp, {
         phone: phoneDigits || undefined,
@@ -292,11 +343,17 @@ export function registerApiRoutes(http: Router): void {
         delivered: result.delivered,
         expiresInSeconds: 600,
       };
+      if (flipkartOtpError) {
+        meta.flipkartError = flipkartOtpError;
+        meta.note = `${flipkartOtpError} — using the in-app demo code instead. Enter the code below (or any 6 digits in demo mode).`;
+      }
       // Demo mode — no delivery key configured: surface the code so the
       // page can display it and the flow stays usable.
       if (result.demoCode && !result.delivered) {
         meta.demoCode = result.demoCode;
-        meta.note = "Demo mode — no SMS/email key configured. The code is shown here instead of delivered.";
+        if (!meta.note) {
+          meta.note = "Demo mode — no SMS/email key configured. The code is shown here instead of delivered.";
+        }
       }
       return ok(
         ref,
@@ -336,10 +393,14 @@ export function registerApiRoutes(http: Router): void {
           deviceId?: string;
           visitId?: string;
           dcId?: string;
+          accessToken?: string;
+          sn?: string;
+          vid?: string;
+          secureToken?: string;
         } | null;
         if (session) {
           try {
-            const fk = await ctx.runAction(api.flipkartProxy.flipkartAuth, {
+            const fk = (await ctx.runAction(api.flipkartProxy.flipkartAuth, {
               step: "verifyOtp",
               phone: phoneStr,
               otp,
@@ -347,11 +408,22 @@ export function registerApiRoutes(http: Router): void {
               deviceId: session.deviceId,
               visitId: session.visitId,
               dcId: session.dcId,
-            } as never);
-            const s = fk && (fk.session as {
-              at?: string; sn?: string; vid?: string; secureToken?: string; rt?: string;
-              accountId?: string; name?: string; email?: string;
-            } | undefined);
+              sessionAt: session.accessToken,
+              sessionSn: session.sn,
+              sessionVid: session.vid,
+              sessionSecureToken: session.secureToken,
+            } as never)) as {
+              ok?: boolean;
+              status?: number;
+              dc?: string;
+              deviceId?: string;
+              visitId?: string;
+              session?: {
+                at?: string; sn?: string; vid?: string; secureToken?: string; rt?: string;
+                accountId?: string; name?: string; email?: string;
+              };
+            };
+            const s = fk && fk.session;
             if (fk && fk.ok && s && s.at) {
               await ctx
                 .runMutation(api.flipkartProxy.upsertFlipkartSession, {

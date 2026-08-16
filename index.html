@@ -2143,6 +2143,7 @@
             location: null,
             otpCode: null,
             flipkartPending: false,
+            flipkartOtpError: null,
             flipkartLive: false,
             isLoading: false,
             dataSource: { source: 'pending', endpoint: '', latencyMs: 0, count: 0, error: '' }
@@ -2919,14 +2920,17 @@
                     // Without a delivery key the gateway runs in demo mode and
                     // returns the code as meta.demoCode — we surface it so
                     // login actually works.
-                    if (data.meta && data.meta.demoCode) {
-                        state.otpCode = String(data.meta.demoCode);
-                        state.flipkartPending = false;
-                    }
                     if (data.meta && data.meta.flipkartSession === 'pending') {
                         // Real Flipkart SMS sent — the code arrives on the phone.
                         state.otpCode = null;
                         state.flipkartPending = true;
+                        state.flipkartOtpError = null;
+                    } else if (data.meta && data.meta.demoCode) {
+                        state.otpCode = String(data.meta.demoCode);
+                        state.flipkartPending = false;
+                        state.flipkartOtpError = data.meta.flipkartError ? String(data.meta.flipkartError) : null;
+                    } else {
+                        state.flipkartOtpError = null;
                     }
                 }
                 showOtpStep();
@@ -2953,6 +2957,14 @@
                 banner.style.color = '#0d47a1';
                 banner.style.border = '1px solid #2874f0';
                 banner.style.display = 'block';
+            } else if (banner && codeEl && state.flipkartOtpError) {
+                banner.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + state.flipkartOtpError +
+                    ' — using the in-app demo code below instead.';
+                banner.style.background = '#fff3e0';
+                banner.style.color = '#e65100';
+                banner.style.border = '1px solid #fb641b';
+                banner.style.display = 'block';
+                codeEl.textContent = state.otpCode || '------';
             } else if (banner && codeEl && state.otpCode) {
                 codeEl.textContent = state.otpCode;
                 banner.style.display = 'block';
