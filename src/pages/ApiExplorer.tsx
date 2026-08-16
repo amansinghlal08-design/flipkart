@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "convex/react";
-import { Loader2, Play, TerminalSquare } from "lucide-react";
+import { Activity, Loader2, Play, RefreshCw, TerminalSquare } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import {
   API_CATEGORIES,
@@ -9,6 +9,7 @@ import {
   API_STATS,
   type ApiEndpoint,
 } from "@/lib/api-endpoints";
+import { api as apiClient, useApiResource } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string;
@@ -19,7 +20,32 @@ const METHOD_STYLES: Record<string, string> = {
   DELETE: "border border-neutral-300 text-neutral-600",
 };
 
-type CallResult = { status: number | null; body?: unknown; error?: string };
+type CallResult = {
+  status: number | null;
+  body?: unknown;
+  error?: string;
+  headers?: Record<string, string>;
+};
+
+const INTERESTING_HEADERS = [
+  "x-request-id",
+  "x-bifrost-request-id",
+  "x-ruk-backend",
+  "x-payload-length",
+  "etag",
+  "cache-control",
+  "content-security-policy",
+  "strict-transport-security",
+  "timing-allow-origin",
+  "access-control-allow-origin",
+];
+
+const CAPTURE_KEYS = [
+  { kind: "Token", keys: "x-goog-api-key · x-session-id" },
+  { kind: "Auth cookies", keys: "at · rt · ULSN · T · SN · ud · vd · S" },
+  { kind: "Browser", keys: "vh · vw · dpr · fonts-loaded · h2NetworkBandwidth" },
+  { kind: "Tracking", keys: "K-ACTION · AMCV_… · s_sq · ak_bmsc · bm_sv" },
+];
 
 export default function ApiExplorer() {
   const products = useQuery(api.products.listProducts, {});
@@ -35,6 +61,12 @@ export default function ApiExplorer() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [callingId, setCallingId] = useState<number | null>(null);
   const [results, setResults] = useState<Record<number, CallResult>>({});
+  const [feedTick, setFeedTick] = useState(0);
+
+  const feed = useApiResource(
+    useCallback(() => apiClient.recentEvents(10), [feedTick]),
+    undefined,
+  );
 
   const endpoints = useMemo(
     () =>
@@ -91,7 +123,11 @@ export default function ApiExplorer() {
         body: ep.method === "GET" ? undefined : JSON.stringify(bodyObj ?? {}),
       });
       const body = await res.json().catch(() => ({}));
-      setResults((r) => ({ ...r, [ep.id]: { status: res.status, body } }));
+      const headers: Record<string, string> = {};
+      res.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      setResults((r) => ({ ...r, [ep.id]: { status: res.status, body, headers } }));
     } catch (error) {
       setResults((r) => ({
         ...r,
@@ -144,6 +180,83 @@ export default function ApiExplorer() {
           </div>
         ))}
       </div>
+
+      {/* Live telemetry feed */}
+      <section className="mt-10 overflow-hidden rounded-2xl border border-neutral-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+              <Activity className="h-4 w-4 text-neutral-400" />
+              Live event feed
+            </h2>
+            <p className="mt-0.5 text-[12px] leading-5 text-neutral-500">
+              Events persisted by the collector (POST /api/v2/analytics/events) —
+              the web app fires these as you browse, add to cart and buy.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedTick((t) => t + 1)}
+            className="flex items-center gap-1.5 rounded-full border border-neutral-300 px-3.5 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-neutral-900 hover:text-neutral-900"
+          >
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", feed.source === "api" && feedTick > 0 && "animate-spin")}
+            />
+            Refresh
+          </button>
+        </div>
+        <div className="max-h-80 overflow-auto">
+          {(feed.data ?? []).length === 0 ? (
+            <p className="px-5 py-8 text-center text-[13px] text-neutral-500">
+              No events yet — browse the storefront and they'll appear here.
+            </p>
+          ) : (
+            <ul className="divide-y divide-neutral-100">
+              {(feed.data ?? []).map((event) => (
+                <li key={event._id} className="flex items-start gap-3 px-5 py-3">
+                  <span className="mt-0.5 shrink-0 rounded bg-neutral-900 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
+                    {event.event}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-[12px] text-neutral-700">
+                      {event.path ?? "—"}
+                    </p>
+                    {event.props && (
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-neutral-400">
+                        {JSON.stringify(event.props)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-neutral-400">
+                    {new Date(event.createdAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      {/* Capture surface — tokens, cookies, headers */}
+      <section className="mt-10 grid gap-4 sm:grid-cols-2">
+        {CAPTURE_KEYS.map(({ kind, keys }) => (
+          <div key={kind} className="rounded-xl border border-neutral-200 p-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-neutral-400">
+              {kind}
+            </p>
+            <p className="mt-2 font-mono text-[12px] leading-6 text-neutral-700">{keys}</p>
+          </div>
+        ))}
+      </section>
+      <p className="mt-3 text-[12px] leading-5 text-neutral-500">
+        Keys captured in the request capture (values scrubbed). Sessions here are
+        handled by Convex Auth instead of client cookies; the gateway emits the
+        security headers listed on every response.
+      </p>
 
       {/* Filters */}
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -321,6 +434,30 @@ export default function ApiExplorer() {
                       {result.status ?? "ERR"}
                     </span>
                   </div>
+                  {result.headers && (
+                    <div className="border-b border-neutral-200 px-4 py-3">
+                      <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-400">
+                        Response headers
+                      </p>
+                      <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                        {INTERESTING_HEADERS.filter((h) => result.headers?.[h]).map(
+                          (h) => (
+                            <div
+                              key={h}
+                              className="flex items-baseline justify-between gap-3"
+                            >
+                              <dt className="shrink-0 font-mono text-[11px] text-neutral-500">
+                                {h}
+                              </dt>
+                              <dd className="truncate text-right font-mono text-[11px] text-neutral-700">
+                                {result.headers![h]}
+                              </dd>
+                            </div>
+                          ),
+                        )}
+                      </dl>
+                    </div>
+                  )}
                   <pre className="max-h-72 overflow-auto p-4 text-[12px] leading-5 text-neutral-700">
                     {result.error ??
                       JSON.stringify(result.body, null, 2)}

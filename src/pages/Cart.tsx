@@ -5,6 +5,7 @@ import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { inr } from "@/lib/format";
+import { trackEvent } from "@/lib/telemetry";
 
 const FREE_DELIVERY_THRESHOLD = 499;
 const DELIVERY_FEE = 49;
@@ -99,7 +100,13 @@ export default function Cart() {
                   <button
                     type="button"
                     aria-label="Remove item"
-                    onClick={() => removeFromCart({ itemId: item._id })}
+                    onClick={() => {
+                      removeFromCart({ itemId: item._id });
+                      trackEvent("remove_from_cart", {
+                        item_id: product._id,
+                        item_name: product.name,
+                      });
+                    }}
                     className="rounded-full p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
                   >
                     <X className="h-4 w-4" />

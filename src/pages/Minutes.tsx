@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { api as apiClient, useApiResource, type PickupPoint } from "@/lib/apiClient";
 import { inr } from "@/lib/format";
+import { trackEvent } from "@/lib/telemetry";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type { Doc } from "@/convex/_generated/dataModel";
@@ -174,6 +175,17 @@ export default function Minutes() {
     setBusyId(product._id);
     try {
       await addToCart({ productId: product._id, quantity: 1 });
+      trackEvent(
+        "add_to_cart",
+        {
+          item_id: product._id,
+          item_name: product.name,
+          quantity: 1,
+          price: product.price,
+          source: "minutes",
+        },
+        "/minutes",
+      );
       toast.success("Added to cart");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add to cart.");

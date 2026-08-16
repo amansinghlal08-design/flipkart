@@ -169,6 +169,16 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_code", ["code"]),
+
+    // ---- telemetry ----
+    analyticsEvents: defineTable({
+      event: v.string(), // page_view | view_item | add_to_cart | begin_checkout | purchase | …
+      path: v.optional(v.string()),
+      props: v.optional(
+        v.record(v.string(), v.union(v.string(), v.number(), v.boolean())),
+      ),
+      createdAt: v.number(),
+    }).index("by_created", ["createdAt"]),
   },
   {
     schemaValidation: false,

@@ -22,28 +22,52 @@ const SORTS = [
   "newest",
 ] as const;
 
+function requestId(): string {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function reply(
   ref: Ref,
   status: number,
   payload: Record<string, unknown>,
   extra: Record<string, unknown> = {},
 ): Response {
-  return new Response(
-    JSON.stringify({
-      ...payload,
-      endpoint: ref.endpoint,
-      method: ref.method,
-      status,
-      ...extra,
-    }),
-    {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-      },
+  const rid = requestId();
+  const body = JSON.stringify({
+    ...payload,
+    endpoint: ref.endpoint,
+    method: ref.method,
+    status,
+    ...extra,
+  });
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      // Caching & optimisation
+      "Cache-Control": "no-store, max-age=0",
+      "ETag": `"${rid.slice(-8)}"`,
+      "Vary": "Origin",
+      // Network & server routing (mirrors the capture's header surface)
+      "x-request-id": rid,
+      "x-bifrost-request-id": rid,
+      "x-ruk-backend": "staple-gateway/1.0.2",
+      "x-payload-length": String(body.length),
+      // CORS
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Authorization, x-session-id",
+      "access-control-max-age": "86400",
+      // Strict security policies
+      "content-security-policy": "default-src 'self'",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "x-xss-protection": "1; mode=block",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "cross-origin-resource-policy": "same-site",
+      "timing-allow-origin": "*",
     },
-  );
+  });
 }
 
 const ok = (ref: Ref, data: unknown, meta: Record<string, unknown> = {}) =>
@@ -984,6 +1008,44 @@ export function registerV2ApiRoutes(http: Router): void {
         endpoint: "/api/v2/wishlist/items/{wishlistItemId}/move-to-cart",
         method: "POST",
       }),
+  });
+
+  // ---------- Telemetry / analytics collector ----------
+  addRoute(http, {
+    path: "/api/v2/analytics/events",
+    method: "POST",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/analytics/events", method: "POST" };
+      const body = await readJson(request);
+      const event = typeof body.event === "string" ? body.event : "unknown";
+      const path = typeof body.path === "string" ? body.path : undefined;
+      const props =
+        body.props && typeof body.props === "object"
+          ? (body.props as Record<string, string | number | boolean>)
+          : undefined;
+      try {
+        await ctx.runMutation(api.analytics.trackEvent, {
+          event,
+          path,
+          props,
+        } as never);
+        return ok(ref, { tracked: true, event, path }, { collector: "in-app" });
+      } catch {
+        return bad(ref, 500, "track_failed", "Could not persist the event.");
+      }
+    },
+  });
+
+  addRoute(http, {
+    path: "/api/v2/analytics/events",
+    method: "GET",
+    handler: async (ctx, request) => {
+      const ref = { endpoint: "/api/v2/analytics/events", method: "GET" };
+      const raw = Number(new URL(request.url).searchParams.get("limit"));
+      const limit = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 50) : 20;
+      const events = await ctx.runQuery(api.analytics.listRecent, { limit });
+      return ok(ref, events, { count: events.length });
+    },
   });
 
   // ---------- Notifications ----------

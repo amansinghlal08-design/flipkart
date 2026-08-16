@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { api as apiClient, useApiResource } from "@/lib/apiClient";
 import { deliveryEta, discountPct, inr, pincodeEta } from "@/lib/format";
+import { trackEvent, trackProductView } from "@/lib/telemetry";
 import { cn } from "@/lib/utils";
 
 export default function ProductDetail() {
@@ -50,6 +51,10 @@ export default function ProductDetail() {
 
   const addToCart = useMutation(api.cart.addToCart);
   const toggleWishlist = useMutation(api.wishlist.toggleWishlist);
+
+  useEffect(() => {
+    if (productData) trackProductView(productData);
+  }, [productData]);
 
   const [quantity, setQuantity] = useState(1);
   const [pincode, setPincode] = useState("");
@@ -124,6 +129,11 @@ export default function ProductDetail() {
     setBusy(true);
     try {
       await addToCart({ productId: product._id, quantity });
+      trackEvent(
+        "add_to_cart",
+        { item_id: product._id, item_name: product.name, quantity, price: product.price },
+        `/product/${product._id}`,
+      );
       toast.success("Added to cart");
       navigate("/cart");
     } catch (error) {
@@ -149,6 +159,11 @@ export default function ProductDetail() {
     if (!requireAuth()) return;
     try {
       const added = await toggleWishlist({ productId: product._id });
+      trackEvent(
+        added ? "add_to_wishlist" : "remove_from_wishlist",
+        { item_id: product._id },
+        `/product/${product._id}`,
+      );
       toast.success(added ? "Saved to wishlist" : "Removed from wishlist");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Something went wrong.");

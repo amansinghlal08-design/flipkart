@@ -147,7 +147,11 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
 
   // ---------- CONTENT / PAGES ----------
   def({ id: 53, method: "GET", endpoint: "/api/4/page/fetch?cacheFirst=false", category: "Content", purpose: "Dynamic content (banners, homepage)", priority: "Critical", captured: true, impl: "live", calls: 16, livePath: "/api/4/page/fetch" }),
-  def({ id: 54, method: "GET", endpoint: "/api/1/action/view", category: "Analytics", purpose: "User action/analytics tracking", priority: "Medium", captured: true, impl: "live", calls: 9, note: "Demo — events acknowledged, not persisted." }),
+  def({ id: 54, method: "GET", endpoint: "/api/1/action/view", category: "Analytics", purpose: "User action/analytics tracking", priority: "Medium", captured: true, impl: "live", calls: 9, note: "The web app fires page views & item views here; events persist via POST /api/v2/analytics/events." }),
+
+  // ---------- TELEMETRY (collector) ----------
+  def({ id: 70, method: "POST", endpoint: "/api/v2/analytics/events", category: "Telemetry", purpose: "Persist a client event (views, clicks, conversions)", priority: "Medium", captured: false, impl: "live", sampleBody: { event: "add_to_cart", path: "/product/x", props: { item_name: "Nova X5", price: 21999 } }, note: "In-app stand-in for 1.sonic.fdp.api.flipkart.com/4/data/collector/business — events are persisted to Convex." }),
+  def({ id: 71, method: "GET", endpoint: "/api/v2/analytics/events", category: "Telemetry", purpose: "Fetch recent captured events", priority: "Low", captured: false, impl: "live", note: "?limit=N — powers the live event feed on this page." }),
 
   // ---------- NOTIFICATIONS ----------
   def({ id: 55, method: "POST", endpoint: "/api/1/connekt/push/callback", category: "Notifications", purpose: "Push notification delivery callback", priority: "Low", captured: true, impl: "live", sampleBody: { event: "delivered" } }),

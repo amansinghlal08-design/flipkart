@@ -136,6 +136,13 @@ export default function Landing() {
   const dealsQuery = useQuery(api.products.dealProducts, {});
   const featuredQuery = useQuery(api.products.featuredProducts, {});
 
+  // The capture's most-called endpoint: GET /api/4/page/fetch drives the whole
+  // homepage layout — hero, categories, deals and featured — with the
+  // per-section endpoints below as fallbacks.
+  const bundle = useApiResource(
+    useCallback(() => apiClient.pageContent(), []),
+    undefined,
+  );
   const categories = useApiResource(
     useCallback(() => apiClient.categories(), []),
     categoriesQuery,
@@ -155,9 +162,15 @@ export default function Landing() {
 
   const [recent] = useState(() => readRecentlyViewed());
 
-  const list = categories.data ?? [];
-  const dealList = deals.data ?? [];
-  const featuredList = featured.data ?? [];
+  const hero = bundle.data?.hero;
+  const list = bundle.data?.categories ?? categories.data ?? [];
+  const dealList = bundle.data?.deals ?? deals.data ?? [];
+  const featuredList = bundle.data?.featured ?? featured.data ?? [];
+
+  const bundleNote =
+    bundle.source === "api"
+      ? `GET /api/4/page/fetch · ${bundle.latencyMs}ms`
+      : "GET /api/4/page/fetch (fallback: per-endpoint)";
 
   return (
     <div>
@@ -171,12 +184,16 @@ export default function Landing() {
             className="mx-auto max-w-3xl text-center"
           >
             <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-neutral-400">
-              A quiet store for daily life
+              {hero?.subhead ?? "A quiet store for daily life"}
             </p>
             <h1 className="mt-6 text-4xl font-semibold leading-[1.08] tracking-tight text-neutral-900 sm:text-6xl">
-              Considered goods,
-              <br />
-              nothing more.
+              {hero?.headline ?? (
+                <>
+                  Considered goods,
+                  <br />
+                  nothing more.
+                </>
+              )}
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-7 text-neutral-500 sm:text-lg">
               Everyday essentials — phones, audio, home, kitchen and more —
@@ -186,6 +203,11 @@ export default function Landing() {
               </Link>
               .
             </p>
+            {bundle.source === "api" && (
+              <p className="mt-4 font-mono text-[11px] text-neutral-400">
+                Homepage layout via {bundleNote}
+              </p>
+            )}
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-11 rounded-full px-7">
                 <Link to="/shop">
@@ -231,9 +253,11 @@ export default function Landing() {
           linkTo="/shop"
           linkLabel="All products"
           apiNote={
-            categories.source === "api"
-              ? `GET /api/v2/categories · ${categories.latencyMs}ms`
-              : "GET /api/v2/categories (Convex fallback)"
+            bundle.source === "api"
+              ? `${bundleNote} (categories)`
+              : categories.source === "api"
+                ? `GET /api/v2/categories · ${categories.latencyMs}ms`
+                : "GET /api/v2/categories (Convex fallback)"
           }
         />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -274,16 +298,18 @@ export default function Landing() {
       {/* Deals */}
       <section className="border-t border-neutral-200/80">
         <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-          <SectionHeading
-            title="Today's best value"
-            linkTo="/shop?sort=price-desc"
-            linkLabel="Shop the deals"
-            apiNote={
-              deals.source === "api"
+        <SectionHeading
+          title="Today's best value"
+          linkTo="/shop?sort=price-desc"
+          linkLabel="Shop the deals"
+          apiNote={
+            bundle.source === "api"
+              ? `${bundleNote} (deals)`
+              : deals.source === "api"
                 ? `GET /api/v2/deals · ${deals.latencyMs}ms`
                 : "GET /api/v2/deals (Convex fallback)"
-            }
-          />
+          }
+        />
           {dealList.length > 0 ? (
             <div className="grid grid-cols-2 gap-x-5 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
               {dealList.map((product) => (
@@ -333,9 +359,11 @@ export default function Landing() {
           linkTo="/shop?sort=rating"
           linkLabel="See top rated"
           apiNote={
-            featured.source === "api"
-              ? `GET /api/v2/recommendations · ${featured.latencyMs}ms`
-              : "GET /api/v2/recommendations (Convex fallback)"
+            bundle.source === "api"
+              ? `${bundleNote} (featured)`
+              : featured.source === "api"
+                ? `GET /api/v2/recommendations · ${featured.latencyMs}ms`
+                : "GET /api/v2/recommendations (Convex fallback)"
           }
         />
         {featuredList.length > 0 ? (
@@ -387,7 +415,7 @@ export default function Landing() {
       )}
 
       <p className="mx-auto max-w-7xl px-4 pb-10 text-center font-mono text-[11px] text-neutral-400 sm:px-6 lg:px-8">
-        {categories.source === "api" || deals.source === "api" || featured.source === "api"
+        {bundle.source === "api" || categories.source === "api" || deals.source === "api" || featured.source === "api"
           ? "Homepage content served via the REST gateway (GET /api/4/page/fetch & friends)."
           : "REST gateway unavailable — serving from Convex."}
       </p>

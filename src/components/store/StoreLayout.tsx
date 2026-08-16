@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { api as apiClient, type Suggestion } from "@/lib/apiClient";
+import { usePageTracking } from "@/lib/telemetry";
 
 let seedRequested = false;
 
@@ -384,6 +385,9 @@ function Footer() {
 export function StoreLayout() {
   const location = useLocation();
   const ensureSeed = useMutation(api.seed.ensureSeed);
+
+  // fire page_view at the analytics collector on every route change
+  usePageTracking();
 
   useEffect(() => {
     if (!seedRequested) {

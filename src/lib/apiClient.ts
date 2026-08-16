@@ -18,7 +18,12 @@ export type ApiEnvelope<T> =
   | { ok: true; data: T; meta?: Record<string, unknown> }
   | { ok: false; error: string; note?: string };
 
-export type ApiResult<T> = { envelope: ApiEnvelope<T>; status: number; latencyMs: number };
+export type ApiResult<T> = {
+  envelope: ApiEnvelope<T>;
+  status: number;
+  latencyMs: number;
+  headers: Record<string, string>;
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   const started = performance.now();
@@ -27,13 +32,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiResult<T
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
   });
   const latencyMs = Math.round(performance.now() - started);
+  const headers: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
   let envelope: ApiEnvelope<T>;
   try {
     envelope = (await res.json()) as ApiEnvelope<T>;
   } catch {
     envelope = { ok: false, error: `Unexpected response (HTTP ${res.status})` };
   }
-  return { envelope, status: res.status, latencyMs };
+  return { envelope, status: res.status, latencyMs, headers };
 }
 
 const qs = (params: Record<string, string | undefined>) =>
@@ -128,6 +137,23 @@ export const api = {
   seller: (sellerId: string) =>
     request<{ id: string; name: string; rating: number; ratingCount: number; yearsActive: number }>(
       `/api/v2/sellers/${sellerId}`,
+    ),
+  /** Fire a telemetry event at the collector (in-app sonic stand-in). */
+  trackEvent: (
+    event: string,
+    props?: Record<string, string | number | boolean>,
+    path?: string,
+  ) =>
+    request<{ tracked: boolean; event: string }>("/api/v2/analytics/events", {
+      method: "POST",
+      body: JSON.stringify({ event, path, props }),
+    }),
+  recentEvents: (limit = 12) =>
+    request<Doc<"analyticsEvents">[]>(`/api/v2/analytics/events?limit=${limit}`),
+  /** The captured click/view tracking endpoint. */
+  trackAction: (action: string, extra?: Record<string, string>) =>
+    request<{ action: string; tracked: boolean }>(
+      `/api/1/action/view?action=${encodeURIComponent(action)}${extra ? `&${qs(extra)}` : ""}`,
     ),
 };
 

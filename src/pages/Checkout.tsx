@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProductVisual } from "@/components/store/ProductVisual";
 import { inr } from "@/lib/format";
+import { trackEvent } from "@/lib/telemetry";
 import { cn } from "@/lib/utils";
 
 const FREE_DELIVERY_THRESHOLD = 499;
@@ -96,6 +97,15 @@ export default function Checkout() {
     const deliveryFee = itemTotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
     return { itemTotal, discount, deliveryFee, grandTotal: itemTotal + deliveryFee };
   }, [cart]);
+
+  // fire begin_checkout once the cart has loaded
+  const checkoutFired = useRef(false);
+  useEffect(() => {
+    if (cart && cart.length > 0 && !checkoutFired.current) {
+      checkoutFired.current = true;
+      trackEvent("begin_checkout", { value: totals.grandTotal, items: cart.length });
+    }
+  }, [cart, totals.grandTotal]);
 
   if (cart === undefined || addresses === undefined || wallet === undefined) {
     return (
@@ -182,6 +192,15 @@ export default function Checkout() {
         addressId: selectedAddress._id,
         paymentMethod,
       });
+      trackEvent(
+        "purchase",
+        {
+          order_id: orderId,
+          value: totals.grandTotal,
+          payment_method: paymentMethod,
+        },
+        "/checkout",
+      );
       toast.success("Order placed");
       navigate(`/orders/${orderId}`);
     } catch (error) {
